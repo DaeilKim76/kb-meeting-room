@@ -17,12 +17,15 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const b = await req.json()
+    if (!b.CODE_GROUP || !b.CODE_GROUP_NAME) {
+      return NextResponse.json({ error: 'MISSING_FIELDS' }, { status: 400 })
+    }
     const sql = getDb()
     const rows = await sql`
       INSERT INTO tb_common_code (code_group, code_group_name, use_yn, created_by, created_at)
       VALUES (${b.CODE_GROUP}, ${b.CODE_GROUP_NAME}, ${b.USE_YN||'Y'}, ${b.CREATED_BY||'system'}, NOW())
       RETURNING *`
-    return NextResponse.json(rows[0], { status: 201 })
+    return NextResponse.json(toUpperAll([rows[0] as any])[0], { status: 201 })
   } catch (e) {
     return apiError(e)
   }

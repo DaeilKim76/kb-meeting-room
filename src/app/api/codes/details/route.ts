@@ -25,6 +25,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const b = await req.json()
+    if (!b.CODE_GROUP_ID || !b.CODE || !b.CODE_NAME) {
+      return NextResponse.json({ error: 'MISSING_FIELDS' }, { status: 400 })
+    }
     const sql = getDb()
     const rows = await sql`
       INSERT INTO tb_common_code_dtl
@@ -32,7 +35,7 @@ export async function POST(req: NextRequest) {
       VALUES (${b.CODE_GROUP_ID}, ${b.CODE}, ${b.CODE_NAME}, ${b.REF_VALUE1||null},
               ${b.SORT_ORDER||null}, ${b.USE_YN||'Y'}, ${b.CREATED_BY||'system'}, NOW())
       RETURNING *`
-    return NextResponse.json(rows[0], { status: 201 })
+    return NextResponse.json(toUpperAll([rows[0] as any])[0], { status: 201 })
   } catch (e) {
     return apiError(e)
   }

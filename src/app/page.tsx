@@ -919,54 +919,106 @@ export default function App() {
 
 // ── Code Manage Sub-page ───────────────────────────────────────
 function CodeManagePage({ codes, codeDtls, setCodes, setCodeDtls, currentUser, T }: any) {
+  const [tab, setTab] = useState<'floor'|'code'>('floor')
+  const [selBuilding, setSelBuilding] = useState<string>('')
   const [selGroupId, setSelGroupId] = useState<number|null>(null)
   const [modal, setModal] = useState<string|null>(null)
   const [modalData, setModalData] = useState<any>({})
 
-  const selGroup = codes.find((c:any) => (g(c,'code_group_id')) == selGroupId)
-  const details  = codeDtls
-    .filter((d:any) => g(d,'code_group_id') == selGroupId)
-    .sort((a:any,b:any) => (g(a,'sort_order')||0)-(g(b,'sort_order')||0))
-
-  // BUILDING 코드에서 실제 등록된 건물 목록 추출
+  // BUILDING 코드 목록
   const buildingGroup = codes.find((c:any) => g(c,'code_group') === 'BUILDING')
   const buildingCodes = buildingGroup
     ? codeDtls.filter((d:any) => g(d,'code_group_id') == g(buildingGroup,'code_group_id') && g(d,'use_yn') === 'Y')
     : []
 
-  // Floor 그룹인지 확인
-  const isFloorGroup = selGroup && g(selGroup,'code_group')?.startsWith('FLOOR_')
-  // Floor 그룹의 건물명 추출
-  const floorBuildingCode = isFloorGroup ? g(selGroup,'code_group')?.replace('FLOOR_','') : null
-  const floorBuildingName = floorBuildingCode
-    ? buildingCodes.find((b:any) => g(b,'code') === floorBuildingCode)
+  // 선택된 건물의 FLOOR 그룹 찾기 (없으면 null)
+  const floorGroup = selBuilding
+    ? codes.find((c:any) => g(c,'code_group') === `FLOOR_${selBuilding}`)
     : null
+  const floorGroupId = floorGroup ? g(floorGroup,'code_group_id') : null
 
+  // 해당 건물 층 코드 목록
+  const floorDetails = floorGroupId
+    ? codeDtls.filter((d:any) => g(d,'code_group_id') == floorGroupId)
+        .sort((a:any,b:any) => (parseInt(g(a,'code'))||0)-(parseInt(g(b,'code'))||0))
+    : []
+
+  // 기타 공통코드 (BUILDING, FLOOR_* 제외)
+  const otherCodes = codes.filter((c:any) =>
+    g(c,'code_group') !== 'BUILDING' && !g(c,'code_group')?.startsWith('FLOOR_')
+  )
+  const selGroup = otherCodes.find((c:any) => g(c,'code_group_id') == selGroupId)
+  const otherDetails = selGroupId
+    ? codeDtls.filter((d:any) => g(d,'code_group_id') == selGroupId)
+        .sort((a:any,b:any) => (g(a,'sort_order')||0)-(g(b,'sort_order')||0))
+    : []
+
+  // 건물 저장/수정
+  async function saveBuilding() {
+    if (!modalData.CODE || !modalData.CODE_NAME) { alert(T.alertRequired); return }
+    const bgid = g(buildingGroup,'code_group_id')
+    if (!bgid) { alert('BUILDING 코드 그룹이 없습니다.'); return }
+    const method = modalData.CODE_ID ? 'PUT' : 'POST'
+    const url    = modalData.CODE_ID ? `/api/codes/details/${modalData.CODE_ID}` : '/api/codes/details'
+    const payload = { ...modalData, CODE_GROUP_ID: bgid, USE_YN: modalData.USE_YN||'Y', CREATED_BY: g(currentUser,'user_id')||'system', UPDATED_BY: g(currentUser,'user_id')||'system' }
+    const res = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
+    const json = await res.json()
+    if (!res.ok) { alert(json.error||'Error'); return }
+    setCodeDtls(await fetch('/api/codes/details').then(r=>r.json()))
+    // 새 건물이면 FLOOR 그룹 자동 생성
+    if (!modalData.CODE_ID) {
+      const grpCode = `FLOOR_${modalData.CODE}`
+      const exists = codes.find((c:any) => g(c,'code_group') === grpCode)
+      if (!exists) {
+        await fetch('/api/codes', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ CODE_GROUP: grpCode, CODE_GROUP_NAME: `${modalData.CODE_NAME} Floors`, USE_YN:'Y', CREATED_BY: g(currentUser,'user_id')||'system' }) })
+        setCodes(await fetch('/api/codes').then(r=>r.json()))
+      }
+    }
+    setModal(null)
+  }
+
+  // 층 저장/수정
+  async function saveFloor() {
+    if (!modalData.CODE || !modalData.CODE_NAME || !floorGroupId) { alert(T.alertRequired); return }
+    const method = modalData.CODE_ID ? 'PUT' : 'POST'
+    const url    = modalData.CODE_ID ? `/api/codes/details/${modalData.CODE_ID}` : '/api/codes/details'
+    const payload = { ...modalData, CODE_GROUP_ID: floorGroupId, USE_YN: modalData.USE_YN||'Y', CREATED_BY: g(currentUser,'user_id')||'system', UPDATED_BY: g(currentUser,'user_id')||'system' }
+    const res = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
+    const json = await res.json()
+    if (!res.ok) { alert(json.error||'Error'); return }
+    setCodeDtls(await fetch('/api/codes/details').then(r=>r.json()))
+    setModal(null)
+  }
+
+  async function deleteFloorOrBuilding(id: number) {
+    if (!confirm('삭제하시겠습니까?')) return
+    await fetch(`/api/codes/details/${id}`, { method: 'DELETE' })
+    setCodeDtls(await fetch('/api/codes/details').then(r=>r.json()))
+    setModal(null)
+  }
+
+  // 기타 코드 그룹 저장
   async function saveGroup() {
+    if (!modalData.CODE_GROUP || !modalData.CODE_GROUP_NAME) { alert(T.alertRequired); return }
     const method = modalData.CODE_GROUP_ID ? 'PUT' : 'POST'
     const url    = modalData.CODE_GROUP_ID ? `/api/codes/${modalData.CODE_GROUP_ID}` : '/api/codes'
     const payload = { CODE_GROUP: modalData.CODE_GROUP, CODE_GROUP_NAME: modalData.CODE_GROUP_NAME, USE_YN: modalData.USE_YN||'Y', CREATED_BY: g(currentUser,'user_id')||'system', UPDATED_BY: g(currentUser,'user_id')||'system' }
     const res = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
-    if (!res.ok) { alert('Error'); return }
+    const json = await res.json()
+    if (!res.ok) { alert(json.error||'Error'); return }
     setCodes(await fetch('/api/codes').then(r=>r.json())); setModal(null)
   }
 
-  async function addFloorGroup(buildingCode: string, buildingName: string) {
-    const grpCode = `FLOOR_${buildingCode}`
-    const exists = codes.find((c:any) => g(c,'code_group') === grpCode)
-    if (exists) { alert(`${buildingName} 층 그룹이 이미 존재합니다.`); return }
-    const res = await fetch('/api/codes', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ CODE_GROUP: grpCode, CODE_GROUP_NAME: `${buildingName} Floors`, USE_YN:'Y', CREATED_BY: g(currentUser,'user_id')||'system' }) })
-    if (!res.ok) { alert('Error'); return }
-    setCodes(await fetch('/api/codes').then(r=>r.json()))
-  }
-
+  // 기타 코드 상세 저장
   async function saveDetail() {
+    if (!modalData.CODE || !modalData.CODE_NAME || !selGroupId) { alert(T.alertRequired); return }
     const method = modalData.CODE_ID ? 'PUT' : 'POST'
     const url    = modalData.CODE_ID ? `/api/codes/details/${modalData.CODE_ID}` : '/api/codes/details'
     const payload = { ...modalData, CODE_GROUP_ID: selGroupId, CREATED_BY: g(currentUser,'user_id')||'system', UPDATED_BY: g(currentUser,'user_id')||'system' }
     const res = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
-    if (!res.ok) { alert('Error'); return }
+    const json = await res.json()
+    if (!res.ok) { alert(json.error||'Error'); return }
     setCodeDtls(await fetch('/api/codes/details').then(r=>r.json())); setModal(null)
   }
 
@@ -979,87 +1031,175 @@ function CodeManagePage({ codes, codeDtls, setCodes, setCodeDtls, currentUser, T
   return (
     <div>
       <PageHeader title={T.codePageTitle} sub={T.codePageSub} />
-      <div className="grid grid-cols-[300px_1fr] gap-4">
-        {/* Code Groups */}
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-          <div className="p-3 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-lg">
-            <span className="text-sm font-semibold">{T.codeGrpTitle}</span>
-            <Btn small primary onClick={() => { setModalData({USE_YN:'Y'}); setModal('group') }}>＋</Btn>
-          </div>
-          {/* BUILDING 기반 Floor 그룹 빠른 추가 */}
-          {buildingCodes.length > 0 && (
-            <div className="p-3 border-b border-gray-100 bg-yellow-50">
-              <div className="text-xs font-semibold text-gray-500 mb-2">🏢 층 그룹 빠른 추가</div>
-              <div className="flex flex-wrap gap-1">
-                {buildingCodes.map((b:any) => {
-                  const exists = codes.find((c:any) => g(c,'code_group') === `FLOOR_${g(b,'code')}`)
-                  return (
-                    <button key={g(b,'code')}
-                      onClick={() => !exists && addFloorGroup(g(b,'code'), g(b,'code_name'))}
-                      className={`text-xs px-2 py-0.5 rounded border transition
-                        ${exists ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-default' : 'bg-white text-blue-600 border-blue-300 hover:bg-blue-50 cursor-pointer'}`}>
-                      {exists ? '✓' : '＋'} {g(b,'code_name')}
-                    </button>
-                  )
-                })}
-              </div>
+
+      {/* Tab 전환 */}
+      <div className="flex gap-1 mb-4 bg-white border border-gray-200 rounded-lg p-1 w-fit shadow-sm">
+        <button onClick={() => setTab('floor')}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${tab==='floor' ? 'bg-[#F5A623] text-[#1A1A2E]' : 'text-gray-500 hover:text-gray-700'}`}>
+          🏢 건물 / 층 관리
+        </button>
+        <button onClick={() => setTab('code')}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${tab==='code' ? 'bg-[#F5A623] text-[#1A1A2E]' : 'text-gray-500 hover:text-gray-700'}`}>
+          ⚙️ 기타 공통코드
+        </button>
+      </div>
+
+      {/* ── 탭 1: 건물 / 층 관리 ── */}
+      {tab === 'floor' && (
+        <div className="grid grid-cols-[280px_1fr] gap-4">
+          {/* 건물 목록 */}
+          <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+            <div className="p-3 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-lg">
+              <span className="text-sm font-semibold">🏢 건물 목록</span>
+              <Btn small primary onClick={() => { setModalData({ USE_YN:'Y', SORT_ORDER: buildingCodes.length + 1 }); setModal('building') }}>＋ 건물</Btn>
             </div>
-          )}
-          <div className="max-h-[500px] overflow-y-auto">
-            {codes.map((grp:any) => (
-              <div key={g(grp,'code_group_id')}
-                onClick={() => setSelGroupId(g(grp,'code_group_id'))}
-                className={`flex items-center px-4 py-2.5 cursor-pointer border-b border-gray-50 transition-all
-                  ${selGroupId==g(grp,'code_group_id') ? 'bg-yellow-50 border-l-2 border-l-[#F5A623]' : 'hover:bg-gray-50'}`}>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">{g(grp,'code_group')}</div>
-                  <div className="text-xs text-gray-400">{g(grp,'code_group_name')}</div>
-                </div>
-                {g(grp,'code_group')?.startsWith('FLOOR_') && (
-                  <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded mr-1">층</span>
+            <div className="divide-y divide-gray-50">
+              {buildingCodes.length === 0
+                ? <div className="text-center py-8 text-gray-300 text-sm">건물이 없습니다</div>
+                : buildingCodes.map((b:any) => (
+                  <div key={g(b,'code_id')}
+                    onClick={() => setSelBuilding(g(b,'code'))}
+                    className={`flex items-center px-4 py-3 cursor-pointer transition-all
+                      ${selBuilding===g(b,'code') ? 'bg-yellow-50 border-l-2 border-l-[#F5A623]' : 'hover:bg-gray-50'}`}>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium">{g(b,'code_name')}</div>
+                      <div className="text-xs text-gray-400">{g(b,'code')}</div>
+                    </div>
+                    <button onClick={e=>{e.stopPropagation();setModalData({CODE_ID:g(b,'code_id'),CODE:g(b,'code'),CODE_NAME:g(b,'code_name'),SORT_ORDER:g(b,'sort_order'),USE_YN:g(b,'use_yn')});setModal('building')}}
+                      className="text-xs px-1.5 py-0.5 bg-gray-100 rounded hover:bg-gray-200">✎</button>
+                  </div>
+                ))
+              }
+            </div>
+          </div>
+
+          {/* 층 목록 */}
+          <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+            <div className="p-3 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-lg">
+              <div>
+                <span className="text-sm font-semibold">
+                  {selBuilding
+                    ? `${buildingCodes.find((b:any)=>g(b,'code')===selBuilding) ? g(buildingCodes.find((b:any)=>g(b,'code')===selBuilding),'code_name') : selBuilding} — 층 목록`
+                    : '층 목록'}
+                </span>
+                {selBuilding && !floorGroup && (
+                  <span className="ml-2 text-xs text-orange-500">층 그룹 없음 — 저장 시 자동 생성</span>
                 )}
-                <button onClick={e=>{e.stopPropagation();setModalData({CODE_GROUP_ID:g(grp,'code_group_id'),CODE_GROUP:g(grp,'code_group'),CODE_GROUP_NAME:g(grp,'code_group_name'),USE_YN:g(grp,'use_yn')});setModal('group')}}
-                  className="text-xs px-1.5 py-0.5 bg-gray-100 rounded hover:bg-gray-200 shrink-0">✎</button>
               </div>
-            ))}
+              <Btn small primary disabled={!selBuilding} onClick={() => { setModalData({ USE_YN:'Y', SORT_ORDER: floorDetails.length + 1 }); setModal('floor') }}>＋ 층</Btn>
+            </div>
+            {!selBuilding
+              ? <div className="text-center py-12 text-gray-300 text-sm">← 건물을 선택하세요</div>
+              : (
+                <table className="w-full">
+                  <thead><tr>
+                    {['층 코드','층명','정렬순서','사용여부','관리'].map(h=><th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-gray-400 uppercase bg-gray-50 border-b">{h}</th>)}
+                  </tr></thead>
+                  <tbody>{floorDetails.length===0
+                    ? <tr><td colSpan={5} className="text-center py-8 text-gray-300 text-sm">층 정보가 없습니다. ＋ 층 버튼으로 추가하세요.</td></tr>
+                    : floorDetails.map((d:any) => (
+                      <tr key={g(d,'code_id')} className="hover:bg-gray-50 border-b border-gray-50">
+                        <td className="px-3 py-2"><code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">{g(d,'code')}</code></td>
+                        <td className="px-3 py-2 font-medium text-sm">{g(d,'code_name')}</td>
+                        <td className="px-3 py-2 text-sm">{g(d,'sort_order')||'—'}</td>
+                        <td className="px-3 py-2">{g(d,'use_yn')==='Y'?<span className="text-green-600 text-xs font-semibold">●</span>:<span className="text-gray-300 text-xs">○</span>}</td>
+                        <td className="px-3 py-2">
+                          <Btn small onClick={()=>{setModalData({CODE_ID:g(d,'code_id'),CODE:g(d,'code'),CODE_NAME:g(d,'code_name'),SORT_ORDER:g(d,'sort_order'),USE_YN:g(d,'use_yn')});setModal('floor')}}>수정</Btn>
+                        </td>
+                      </tr>
+                    ))
+                  }</tbody>
+                </table>
+              )
+            }
           </div>
         </div>
+      )}
 
-        {/* Code Details */}
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-          <div className="p-3 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-lg">
-            <div>
-              <span className="text-sm font-semibold">
-                {selGroup ? g(selGroup,'code_group') : T.codeGrpTitle}
-              </span>
-              {isFloorGroup && floorBuildingName && (
-                <span className="ml-2 text-xs text-blue-600">({g(floorBuildingName,'code_name')} 건물 층 코드)</span>
-              )}
+      {/* ── 탭 2: 기타 공통코드 ── */}
+      {tab === 'code' && (
+        <div className="grid grid-cols-[280px_1fr] gap-4">
+          <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+            <div className="p-3 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-lg">
+              <span className="text-sm font-semibold">코드 그룹</span>
+              <Btn small primary onClick={() => { setModalData({USE_YN:'Y'}); setModal('group') }}>＋</Btn>
             </div>
-            <Btn small primary disabled={!selGroupId} onClick={() => { setModalData({USE_YN:'Y'}); setModal('detail') }}>＋ 코드 추가</Btn>
+            <div className="max-h-[500px] overflow-y-auto divide-y divide-gray-50">
+              {otherCodes.map((grp:any) => (
+                <div key={g(grp,'code_group_id')}
+                  onClick={() => setSelGroupId(g(grp,'code_group_id'))}
+                  className={`flex items-center px-4 py-2.5 cursor-pointer transition-all
+                    ${selGroupId==g(grp,'code_group_id') ? 'bg-yellow-50 border-l-2 border-l-[#F5A623]' : 'hover:bg-gray-50'}`}>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">{g(grp,'code_group')}</div>
+                    <div className="text-xs text-gray-400">{g(grp,'code_group_name')}</div>
+                  </div>
+                  <button onClick={e=>{e.stopPropagation();setModalData({CODE_GROUP_ID:g(grp,'code_group_id'),CODE_GROUP:g(grp,'code_group'),CODE_GROUP_NAME:g(grp,'code_group_name'),USE_YN:g(grp,'use_yn')});setModal('group')}}
+                    className="text-xs px-1.5 py-0.5 bg-gray-100 rounded hover:bg-gray-200 shrink-0">✎</button>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="overflow-x-auto">
+          <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+            <div className="p-3 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-lg">
+              <span className="text-sm font-semibold">{selGroup ? g(selGroup,'code_group') : '코드 상세'}</span>
+              <Btn small primary disabled={!selGroupId} onClick={() => { setModalData({USE_YN:'Y'}); setModal('detail') }}>＋ 코드 추가</Btn>
+            </div>
             <table className="w-full">
               <thead><tr>{T.codeDtlThead.map((h:string)=><th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-gray-400 uppercase bg-gray-50 border-b">{h}</th>)}</tr></thead>
-              <tbody>{details.length===0
+              <tbody>{otherDetails.length===0
                 ? <tr><td colSpan={5} className="text-center py-8 text-gray-300 text-sm">{selGroupId ? T.tableNoData : '← 코드 그룹을 선택하세요'}</td></tr>
-                : details.map((d:any) => (
+                : otherDetails.map((d:any) => (
                   <tr key={g(d,'code_id')} className="hover:bg-gray-50 border-b border-gray-50">
                     <td className="px-3 py-2"><code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">{g(d,'code')}</code></td>
                     <td className="px-3 py-2 font-medium text-sm">{g(d,'code_name')}</td>
                     <td className="px-3 py-2 text-sm">{g(d,'sort_order')||'—'}</td>
                     <td className="px-3 py-2">{g(d,'use_yn')==='Y'?<span className="text-green-600 text-xs font-semibold">●</span>:<span className="text-gray-300 text-xs">○</span>}</td>
-                    <td className="px-3 py-2">
-                      <Btn small onClick={()=>{setModalData({CODE_ID:g(d,'code_id'),CODE:g(d,'code'),CODE_NAME:g(d,'code_name'),SORT_ORDER:g(d,'sort_order'),USE_YN:g(d,'use_yn')});setModal('detail')}}>수정</Btn>
-                    </td>
+                    <td className="px-3 py-2"><Btn small onClick={()=>{setModalData({CODE_ID:g(d,'code_id'),CODE:g(d,'code'),CODE_NAME:g(d,'code_name'),SORT_ORDER:g(d,'sort_order'),USE_YN:g(d,'use_yn')});setModal('detail')}}>수정</Btn></td>
                   </tr>
                 ))
               }</tbody>
             </table>
           </div>
         </div>
-      </div>
+      )}
 
+      {/* 건물 모달 */}
+      {modal === 'building' && (
+        <DraggableModal title={modalData.CODE_ID ? '건물 수정' : '＋ 건물 추가'} onClose={() => setModal(null)} size="sm">
+          <div className="space-y-3">
+            <FormGroup label="건물 코드 (영문대문자)" required><input className={inputCls} value={modalData.CODE||''} disabled={!!modalData.CODE_ID} placeholder="HEAD_QUARTER" onChange={e=>setModalData({...modalData,CODE:e.target.value.toUpperCase()})} /></FormGroup>
+            <FormGroup label="건물명" required><input className={inputCls} value={modalData.CODE_NAME||''} placeholder="Head Quarter" onChange={e=>setModalData({...modalData,CODE_NAME:e.target.value})} /></FormGroup>
+            <FormGroup label="정렬순서"><input type="number" className={inputCls} value={modalData.SORT_ORDER||''} onChange={e=>setModalData({...modalData,SORT_ORDER:parseInt(e.target.value)})} /></FormGroup>
+            <FormGroup label="사용여부"><select className={inputCls} value={modalData.USE_YN||'Y'} onChange={e=>setModalData({...modalData,USE_YN:e.target.value})}><option value="Y">Y</option><option value="N">N</option></select></FormGroup>
+            {!modalData.CODE_ID && <div className="text-xs text-blue-600 bg-blue-50 p-2 rounded">💡 건물 추가 시 층 그룹(FLOOR_코드)이 자동으로 생성됩니다.</div>}
+          </div>
+          <ModalFooter>
+            {modalData.CODE_ID && <Btn danger onClick={()=>deleteFloorOrBuilding(modalData.CODE_ID)}>삭제</Btn>}
+            <Btn onClick={()=>setModal(null)}>닫기</Btn>
+            <Btn primary onClick={saveBuilding}>저장</Btn>
+          </ModalFooter>
+        </DraggableModal>
+      )}
+
+      {/* 층 모달 */}
+      {modal === 'floor' && (
+        <DraggableModal title={modalData.CODE_ID ? '층 수정' : '＋ 층 추가'} onClose={() => setModal(null)} size="sm">
+          <div className="space-y-3">
+            <FormGroup label="층 코드 (숫자)" required><input className={inputCls} value={modalData.CODE||''} placeholder="3" onChange={e=>setModalData({...modalData,CODE:e.target.value})} /></FormGroup>
+            <FormGroup label="층명" required><input className={inputCls} value={modalData.CODE_NAME||''} placeholder="Floor 3" onChange={e=>setModalData({...modalData,CODE_NAME:e.target.value})} /></FormGroup>
+            <FormGroup label="정렬순서"><input type="number" className={inputCls} value={modalData.SORT_ORDER||''} onChange={e=>setModalData({...modalData,SORT_ORDER:parseInt(e.target.value)})} /></FormGroup>
+            <FormGroup label="사용여부"><select className={inputCls} value={modalData.USE_YN||'Y'} onChange={e=>setModalData({...modalData,USE_YN:e.target.value})}><option value="Y">Y</option><option value="N">N</option></select></FormGroup>
+          </div>
+          <ModalFooter>
+            {modalData.CODE_ID && <Btn danger onClick={()=>deleteFloorOrBuilding(modalData.CODE_ID)}>삭제</Btn>}
+            <Btn onClick={()=>setModal(null)}>닫기</Btn>
+            <Btn primary onClick={saveFloor}>저장</Btn>
+          </ModalFooter>
+        </DraggableModal>
+      )}
+
+      {/* 기타 코드 그룹 모달 */}
       {modal === 'group' && (
         <DraggableModal title="코드 그룹" onClose={() => setModal(null)} size="sm">
           <div className="space-y-3">
@@ -1070,6 +1210,8 @@ function CodeManagePage({ codes, codeDtls, setCodes, setCodeDtls, currentUser, T
           <ModalFooter><Btn onClick={()=>setModal(null)}>닫기</Btn><Btn primary onClick={saveGroup}>저장</Btn></ModalFooter>
         </DraggableModal>
       )}
+
+      {/* 기타 코드 상세 모달 */}
       {modal === 'detail' && (
         <DraggableModal title="코드 상세" onClose={() => setModal(null)} size="sm">
           <div className="space-y-3">
@@ -1088,6 +1230,7 @@ function CodeManagePage({ codes, codeDtls, setCodes, setCodeDtls, currentUser, T
     </div>
   )
 }
+
 
 // ── Shared UI Components ───────────────────────────────────────
 const inputCls = 'w-full px-2.5 py-1.5 border border-gray-200 rounded-md text-sm focus:outline-none focus:border-[#F5A623] focus:ring-1 focus:ring-[#F5A623]/20 bg-white'

@@ -4,91 +4,76 @@
  *
  * ── 수정 이력 ──────────────────────────────────────────────────
  * v1.0  2025-04-19  최초 생성
- *                   - 캘린더 예약 뷰
- *                   - 내 예약 조회
- *                   - 승인 대상 예약 (승인/반려)
- *                   - 미팅룸 관리
- *                   - 권한 관리 (승인자 멀티 지정)
- *                   - 사용자 관리 (신규)
- *                   - 공통코드 관리
- *                   - 예약 이력
- *                   - 다국어 지원 (한국어/English/ខ្មែរ)
- *
- * v1.1  2025-04-19  Bug Fix
- *                   - line 530: onClick에서 setModal() || setModalData() 패턴
- *                     void 타입 truthiness 체크 오류 수정
- *                     변경 전: onClick={() => setModal('room') || setModalData({...r})}
- *                     변경 후: onClick={() => { setModalData({...r}); setModal('room') }}
+ * v1.1  2025-04-19  Bug Fix - void 타입 truthiness 오류 수정
+ * v1.2  2025-04-19  기능 개선
+ *                   - 팝업 드래그 이동 기능 추가
+ *                   - 공통코드 관리: BUILDING 기반 동적 Floor 그룹 관리
+ *                   - 권한 관리: 소문자 API 응답 처리 수정
+ *                   - 권한 관리: 미팅룸별 승인자 복수 지정 UI 개선
  * ───────────────────────────────────────────────────────────────
  */
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { t } from '@/lib/i18n'
 import type { Lang, User, MeetingRoom, Reservation, RoomUserAuth, ReservationHistory, CommonCode, CommonCodeDtl } from '@/lib/types'
 import { STATUS_BADGE } from '@/lib/types'
 
-// ── 시간 슬롯 ──────────────────────────────────────────────────
 const TIME_SLOTS = ['07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30',
   '12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00']
 
-// ── 유틸 ──────────────────────────────────────────────────────
 function fmtDate(d: Date) { return d.toISOString().split('T')[0] }
 function today() { return fmtDate(new Date()) }
+
+// DB 응답은 소문자 — 어느 쪽이든 읽을 수 있는 헬퍼
+function g(obj: any, key: string) { return obj?.[key] ?? obj?.[key.toLowerCase()] ?? obj?.[key.toUpperCase()] }
+
 function badge(status: string) {
   const s = STATUS_BADGE[status as keyof typeof STATUS_BADGE]
   return s ? <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${s.cls}`}>{s.en}</span> : <span>{status}</span>
 }
 
-// ── 메인 컴포넌트 ─────────────────────────────────────────────
 export default function App() {
   const [lang, setLang] = useState<Lang>('ko')
   const [page, setPage] = useState('calendar')
-  const [users, setUsers]   = useState<User[]>([])
-  const [rooms, setRooms]   = useState<MeetingRoom[]>([])
-  const [codes, setCodes]   = useState<CommonCode[]>([])
-  const [codeDtls, setCodeDtls] = useState<CommonCodeDtl[]>([])
-  const [currentUser, setCurrentUser] = useState<User | null>(null)
+  const [users, setUsers]   = useState<any[]>([])
+  const [rooms, setRooms]   = useState<any[]>([])
+  const [codes, setCodes]   = useState<any[]>([])
+  const [codeDtls, setCodeDtls] = useState<any[]>([])
+  const [currentUser, setCurrentUser] = useState<any>(null)
   const [loading, setLoading] = useState(false)
 
-  // Calendar state
   const [calYear, setCalYear]   = useState(new Date().getFullYear())
   const [calMonth, setCalMonth] = useState(new Date().getMonth())
-  const [calRoomId, setCalRoomId]   = useState('')
+  const [calRoomId, setCalRoomId]     = useState('')
   const [calBuilding, setCalBuilding] = useState('')
-  const [calFloor, setCalFloor]     = useState('')
-  const [calReservations, setCalReservations] = useState<Reservation[]>([])
+  const [calFloor, setCalFloor]       = useState('')
+  const [calReservations, setCalReservations] = useState<any[]>([])
 
-  // My reservations
-  const [myResFrom, setMyResFrom] = useState(() => { const d = new Date(); d.setDate(1); return fmtDate(d) })
+  const [myResFrom, setMyResFrom]       = useState(() => { const d = new Date(); d.setDate(1); return fmtDate(d) })
   const [myResToDate, setMyResToDate]   = useState(() => { const d = new Date(); d.setMonth(d.getMonth()+1,0); return fmtDate(d) })
   const [myResStatus, setMyResStatus]   = useState('')
   const [myResTitle, setMyResTitle]     = useState('')
-  const [myResList, setMyResList]       = useState<Reservation[]>([])
+  const [myResList, setMyResList]       = useState<any[]>([])
 
-  // Approvals
-  const [appFrom, setAppFrom]   = useState(today())
-  const [appTo, setAppTo]       = useState(() => { const d = new Date(); d.setMonth(d.getMonth()+1); return fmtDate(d) })
-  const [appList, setAppList]   = useState<Reservation[]>([])
+  const [appFrom, setAppFrom] = useState(today())
+  const [appTo, setAppTo]     = useState(() => { const d = new Date(); d.setMonth(d.getMonth()+1); return fmtDate(d) })
+  const [appList, setAppList] = useState<any[]>([])
 
-  // Auth manage
-  const [authList, setAuthList]         = useState<RoomUserAuth[]>([])
+  const [authList, setAuthList]             = useState<any[]>([])
   const [authFilterRoom, setAuthFilterRoom] = useState('')
   const [authFilterType, setAuthFilterType] = useState('')
 
-  // History
-  const [hisList, setHisList]       = useState<ReservationHistory[]>([])
+  const [hisList, setHisList]       = useState<any[]>([])
   const [hisFrom, setHisFrom]       = useState(() => { const d = new Date(); d.setDate(d.getDate()-30); return fmtDate(d) })
   const [hisTo, setHisTo]           = useState(today())
   const [hisActType, setHisActType] = useState('')
   const [hisUser, setHisUser]       = useState('')
 
-  // Modal state
   const [modal, setModal]         = useState<string|null>(null)
   const [modalData, setModalData] = useState<any>({})
 
   const T = t(lang)
 
-  // ── 초기 로딩 ──
   useEffect(() => {
     Promise.all([
       fetch('/api/users').then(r=>r.json()),
@@ -96,41 +81,40 @@ export default function App() {
       fetch('/api/codes').then(r=>r.json()),
       fetch('/api/codes/details').then(r=>r.json()),
     ]).then(([u, r, c, cd]) => {
-      setUsers(u); setRooms(r); setCodes(c); setCodeDtls(cd)
-      if (u.length) setCurrentUser(u.find((x:User)=>x.USE_YN==='Y') || u[0])
+      setUsers(Array.isArray(u)?u:[])
+      setRooms(Array.isArray(r)?r:[])
+      setCodes(Array.isArray(c)?c:[])
+      setCodeDtls(Array.isArray(cd)?cd:[])
+      if (Array.isArray(u) && u.length) setCurrentUser(u.find((x:any)=>g(x,'use_yn')==='Y') || u[0])
     })
   }, [])
 
   useEffect(() => { if (currentUser) loadCalendar() }, [calYear, calMonth, calRoomId])
 
-  // ── 권한 헬퍼 ──
-  const isSysAdmin  = currentUser?.IS_SYS_ADMIN === 'Y'
-  const isApprover  = useCallback((roomId?: number) => {
-    // 실제 환경에서는 DB auth 체크 — 여기선 IS_SYS_ADMIN 또는 별도 authList 기반
-    return isSysAdmin
-  }, [isSysAdmin])
+  const isSysAdmin = g(currentUser,'is_sys_admin') === 'Y'
 
-  // ── Building / Floor 코드 헬퍼 ──
   function getBuildingCodes() {
-    const grp = codes.find(c=>c.CODE_GROUP==='BUILDING')
+    const grp = codes.find(c => g(c,'code_group') === 'BUILDING')
     if (!grp) return []
-    return codeDtls.filter(d=>d.CODE_GROUP_ID===grp.CODE_GROUP_ID && d.USE_YN==='Y')
+    const gid = g(grp,'code_group_id')
+    return codeDtls.filter(d => g(d,'code_group_id') == gid && g(d,'use_yn') === 'Y')
   }
   function getFloorCodes(building: string) {
+    if (!building) return []
     const grpCode = `FLOOR_${building}`
-    const grp = codes.find(c=>c.CODE_GROUP===grpCode)
+    const grp = codes.find(c => g(c,'code_group') === grpCode)
     if (!grp) return []
-    return codeDtls.filter(d=>d.CODE_GROUP_ID===grp.CODE_GROUP_ID && d.USE_YN==='Y')
+    const gid = g(grp,'code_group_id')
+    return codeDtls.filter(d => g(d,'code_group_id') == gid && g(d,'use_yn') === 'Y')
   }
   function filteredRooms(building='', floor='') {
-    return rooms.filter(r=>
-      r.USE_YN==='Y' &&
-      (!building || r.BUILDING_CODE===building) &&
-      (!floor    || r.FLOOR_CODE===floor)
+    return rooms.filter(r =>
+      g(r,'use_yn') === 'Y' &&
+      (!building || g(r,'building_code') === building) &&
+      (!floor    || g(r,'floor_code')    === floor)
     )
   }
 
-  // ── Calendar ──
   async function loadCalendar() {
     const from = fmtDate(new Date(calYear, calMonth, 1))
     const to   = fmtDate(new Date(calYear, calMonth+1, 0))
@@ -144,41 +128,31 @@ export default function App() {
     const first = new Date(calYear, calMonth, 1)
     const last  = new Date(calYear, calMonth+1, 0)
     const days: { date: Date; current: boolean }[] = []
-    for (let i = first.getDay()-1; i >= 0; i--) {
-      const d = new Date(calYear, calMonth, -i); days.push({ date: d, current: false })
-    }
-    for (let i = 1; i <= last.getDate(); i++) {
-      days.push({ date: new Date(calYear, calMonth, i), current: true })
-    }
-    while (days.length % 7 !== 0) {
-      const d = new Date(calYear, calMonth+1, days.length - last.getDate() - first.getDay() + 2)
-      days.push({ date: d, current: false })
-    }
+    for (let i = first.getDay()-1; i >= 0; i--) { const d = new Date(calYear, calMonth, -i); days.push({ date: d, current: false }) }
+    for (let i = 1; i <= last.getDate(); i++) { days.push({ date: new Date(calYear, calMonth, i), current: true }) }
+    while (days.length % 7 !== 0) { const d = new Date(calYear, calMonth+1, days.length - last.getDate() - first.getDay() + 2); days.push({ date: d, current: false }) }
     return days
   }
 
   function resForDate(dateStr: string) {
-    return calReservations.filter(r => r.RESERVATION_DATE === dateStr && r.CANCEL_YN !== 'Y')
+    return calReservations.filter(r => g(r,'reservation_date')?.slice(0,10) === dateStr && g(r,'cancel_yn') !== 'Y')
   }
 
-  // ── My Reservations ──
   async function loadMyRes() {
     if (!currentUser) return
-    const params = new URLSearchParams({ user_id: currentUser.USER_ID, from_date: myResFrom, to_date: myResToDate })
+    const params = new URLSearchParams({ user_id: g(currentUser,'user_id'), from_date: myResFrom, to_date: myResToDate })
     if (myResStatus) params.set('status', myResStatus)
     if (myResTitle)  params.set('title', myResTitle)
     const data = await fetch(`/api/reservations?${params}`).then(r=>r.json())
     setMyResList(Array.isArray(data) ? data : [])
   }
 
-  // ── Approvals ──
   async function loadApprovals() {
     const params = new URLSearchParams({ from_date: appFrom, to_date: appTo, status: 'REQUESTED' })
     const data = await fetch(`/api/reservations?${params}`).then(r=>r.json())
     setAppList(Array.isArray(data) ? data : [])
   }
 
-  // ── Auth Manage ──
   async function loadAuthList() {
     const params = new URLSearchParams()
     if (authFilterRoom) params.set('room_id', authFilterRoom)
@@ -187,7 +161,6 @@ export default function App() {
     setAuthList(Array.isArray(data) ? data : [])
   }
 
-  // ── History ──
   async function loadHistory() {
     const params = new URLSearchParams({ from_date: hisFrom, to_date: hisTo })
     if (hisActType) params.set('action_type', hisActType)
@@ -196,16 +169,13 @@ export default function App() {
     setHisList(Array.isArray(data) ? data : [])
   }
 
-  // ── 예약 저장 ──
   async function saveReservation() {
     const d = modalData
-    if (!d.ROOM_ID || !d.RESERVATION_DATE || !d.START_TIME || !d.END_TIME || !d.TITLE) {
-      alert(T.alertRequired); return
-    }
-    if (!d.ALL_DAY_YN && d.START_TIME >= d.END_TIME) { alert(T.alertTimeOrder); return }
+    if (!d.ROOM_ID || !d.RESERVATION_DATE || !d.START_TIME || !d.END_TIME || !d.TITLE) { alert(T.alertRequired); return }
+    if (d.ALL_DAY_YN !== 'Y' && d.START_TIME >= d.END_TIME) { alert(T.alertTimeOrder); return }
     setLoading(true)
     try {
-      const payload = { ...d, REQUEST_USER_ID: currentUser?.USER_ID }
+      const payload = { ...d, REQUEST_USER_ID: g(currentUser,'user_id') }
       const method  = d.RESERVATION_ID ? 'PUT' : 'POST'
       const url     = d.RESERVATION_ID ? `/api/reservations/${d.RESERVATION_ID}` : '/api/reservations'
       const res     = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) })
@@ -216,32 +186,27 @@ export default function App() {
     } finally { setLoading(false) }
   }
 
-  // ── 예약 취소 ──
   async function cancelReservation(id: number) {
-    if (!confirm(T.alertDeleted)) return
-    await fetch(`/api/reservations/${id}`, { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser?.USER_ID }) })
+    if (!confirm('예약을 취소하시겠습니까?')) return
+    await fetch(`/api/reservations/${id}`, { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ userId: g(currentUser,'user_id') }) })
     loadMyRes(); loadCalendar()
   }
 
-  // ── 승인/반려 ──
   async function processApproval(reservationId: number, action: 'APPROVED'|'REJECTED') {
-    const comment = modalData.ACTION_COMMENT || ''
-    const reason  = modalData.REJECT_REASON  || ''
+    const reason = modalData.REJECT_REASON || ''
     if (action === 'REJECTED' && !reason) { alert(T.alertRejectReasonRequired); return }
     setLoading(true)
     try {
       const res = await fetch('/api/approvals', {
         method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ RESERVATION_ID: reservationId, APPROVER_USER_ID: currentUser?.USER_ID, ACTION: action, ACTION_COMMENT: comment, REJECT_REASON: reason })
+        body: JSON.stringify({ RESERVATION_ID: reservationId, APPROVER_USER_ID: g(currentUser,'user_id'), ACTION: action, ACTION_COMMENT: modalData.ACTION_COMMENT||'', REJECT_REASON: reason })
       })
       const json = await res.json()
       if (!res.ok) { alert(json.error); return }
-      alert(action === 'APPROVED' ? T.btnApprove + ' ' + T.alertSaved : T.btnReject + ' ' + T.alertSaved)
-      setModal(null); loadApprovals()
+      alert(T.alertSaved); setModal(null); loadApprovals()
     } finally { setLoading(false) }
   }
 
-  // ── 미팅룸 저장 ──
   async function saveRoom() {
     const d = modalData
     if (!d.BUILDING_CODE || !d.FLOOR_CODE || !d.ROOM_CODE || !d.ROOM_NAME) { alert(T.alertRequired); return }
@@ -249,16 +214,13 @@ export default function App() {
     try {
       const method = d.ROOM_ID ? 'PUT' : 'POST'
       const url    = d.ROOM_ID ? `/api/rooms/${d.ROOM_ID}` : '/api/rooms'
-      const payload = { ...d, CREATED_BY: currentUser?.USER_ID, UPDATED_BY: currentUser?.USER_ID }
-      const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) })
+      const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify({ ...d, CREATED_BY: g(currentUser,'user_id'), UPDATED_BY: g(currentUser,'user_id') }) })
       if (!res.ok) { alert((await res.json()).error); return }
       alert(T.alertSaved); setModal(null)
-      const updated = await fetch('/api/rooms').then(r=>r.json())
-      setRooms(updated)
+      setRooms(await fetch('/api/rooms').then(r=>r.json()))
     } finally { setLoading(false) }
   }
 
-  // ── 사용자 저장 ──
   async function saveUser() {
     const d = modalData
     if (!d.USER_ID || !d.USER_NAME) { alert(T.alertRequired); return }
@@ -269,12 +231,10 @@ export default function App() {
       const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(d) })
       if (!res.ok) { alert((await res.json()).error); return }
       alert(T.alertSaved); setModal(null)
-      const updated = await fetch('/api/users').then(r=>r.json())
-      setUsers(updated)
+      setUsers(await fetch('/api/users').then(r=>r.json()))
     } finally { setLoading(false) }
   }
 
-  // ── 권한 저장 ──
   async function saveAuth() {
     const d = modalData
     if (!d.ROOM_ID || !d.USER_ID || !d.AUTH_TYPE) { alert(T.alertRequired); return }
@@ -282,8 +242,7 @@ export default function App() {
     try {
       const method = d.ROOM_AUTH_ID ? 'PUT' : 'POST'
       const url    = d.ROOM_AUTH_ID ? `/api/auth-manage/${d.ROOM_AUTH_ID}` : '/api/auth-manage'
-      const payload = { ...d, CREATED_BY: currentUser?.USER_ID, UPDATED_BY: currentUser?.USER_ID }
-      const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) })
+      const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify({ ...d, CREATED_BY: g(currentUser,'user_id'), UPDATED_BY: g(currentUser,'user_id') }) })
       const json = await res.json()
       if (json.error === 'DUPLICATE') { alert(T.alertDuplicateAuth); return }
       if (!res.ok) { alert(json.error); return }
@@ -291,7 +250,6 @@ export default function App() {
     } finally { setLoading(false) }
   }
 
-  // ── navigate ──
   function navigate(p: string) {
     setPage(p)
     if (p === 'myreservations') loadMyRes()
@@ -300,29 +258,23 @@ export default function App() {
     if (p === 'history')        loadHistory()
   }
 
-  // ── pending approval count ──
   const pendingCount = appList.length
 
-  // ─────────────────────────────────────────────────────────────
-  // RENDER
-  // ─────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Loading overlay */}
       {loading && (
         <div className="fixed inset-0 bg-white/80 z-[9999] flex items-center justify-center">
           <div className="w-9 h-9 border-4 border-gray-200 border-t-[#F5A623] rounded-full animate-spin" />
         </div>
       )}
 
-      {/* ── Header ── */}
+      {/* Header */}
       <header className="bg-[#1A1A2E] h-14 flex items-center justify-between px-6 sticky top-0 z-50 shadow-md gap-3">
         <div className="flex items-center gap-3 shrink-0">
           <div className="bg-[#F5A623] text-[#1A1A2E] font-bold text-sm px-2.5 py-1 rounded">KB Prasac</div>
           <span className="text-white text-sm font-medium hidden sm:block">{T.appTitle}</span>
         </div>
         <div className="flex items-center gap-2">
-          {/* Lang switcher */}
           <div className="flex items-center gap-1 bg-white/10 border border-white/20 rounded p-1">
             {(['ko','en','kh'] as Lang[]).map(l => (
               <button key={l} onClick={() => setLang(l)}
@@ -331,12 +283,9 @@ export default function App() {
               </button>
             ))}
           </div>
-          {/* User */}
           <div className="text-right hidden sm:block">
-            <div className="text-white text-xs font-medium">{currentUser?.USER_NAME}</div>
-            <div className="text-[#F5A623] text-[10px] font-mono">
-              {currentUser?.IS_SYS_ADMIN==='Y' ? T.roleAdmin : T.roleUser}
-            </div>
+            <div className="text-white text-xs font-medium">{g(currentUser,'user_name')}</div>
+            <div className="text-[#F5A623] text-[10px] font-mono">{isSysAdmin ? T.roleAdmin : T.roleUser}</div>
           </div>
           <button onClick={() => setModal('userSwitch')}
             className="bg-white/10 border border-white/20 text-white text-xs px-3 py-1.5 rounded hover:bg-white/20 transition">
@@ -346,19 +295,17 @@ export default function App() {
       </header>
 
       <div className="flex flex-1">
-        {/* ── Sidebar ── */}
+        {/* Sidebar */}
         <aside className="w-52 bg-[#16213E] shrink-0 sticky top-14 h-[calc(100vh-56px)] overflow-y-auto hidden md:block">
           <div className="py-5">
             <NavSection title={T.sideCommon}>
               <NavItem icon="📅" label={T.navCalendar}   active={page==='calendar'}       onClick={() => navigate('calendar')} />
               <NavItem icon="📋" label={T.navMyRes}       active={page==='myreservations'} onClick={() => navigate('myreservations')} />
             </NavSection>
-            {(isSysAdmin || true) && (
-              <NavSection title={T.sideApprover}>
-                <NavItem icon="✅" label={T.navApprovals} active={page==='approvals'} onClick={() => navigate('approvals')}
-                  badge={pendingCount > 0 ? pendingCount : undefined} />
-              </NavSection>
-            )}
+            <NavSection title={T.sideApprover}>
+              <NavItem icon="✅" label={T.navApprovals} active={page==='approvals'} onClick={() => navigate('approvals')}
+                badge={pendingCount > 0 ? pendingCount : undefined} />
+            </NavSection>
             {isSysAdmin && (
               <NavSection title={T.sideAdmin}>
                 <NavItem icon="🏢" label={T.navRoomManage}  active={page==='roommanage'}  onClick={() => navigate('roommanage')} />
@@ -371,45 +318,43 @@ export default function App() {
           </div>
         </aside>
 
-        {/* ── Main ── */}
+        {/* Main */}
         <main className="flex-1 p-6 overflow-y-auto">
 
-          {/* ── Calendar Page ── */}
+          {/* Calendar */}
           {page === 'calendar' && (
             <div>
               <PageHeader title={T.calPageTitle} sub={T.calPageSub}>
-                <Btn onClick={() => setModal('reservation')} primary>{T.btnNewRes}</Btn>
+                <Btn primary onClick={() => { setModalData({}); setModal('reservation') }}>{T.btnNewRes}</Btn>
               </PageHeader>
-              {/* Filter */}
               <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4 shadow-sm flex flex-wrap gap-3 items-end">
                 <FormGroup label={T.lblBuilding}>
                   <select className={inputCls} value={calBuilding} onChange={e => { setCalBuilding(e.target.value); setCalFloor(''); setCalRoomId('') }}>
                     <option value="">{T.statusAll}</option>
-                    {getBuildingCodes().map(b => <option key={b.CODE} value={b.CODE}>{b.CODE_NAME}</option>)}
+                    {getBuildingCodes().map(b => <option key={g(b,'code')} value={g(b,'code')}>{g(b,'code_name')}</option>)}
                   </select>
                 </FormGroup>
                 <FormGroup label={T.lblFloor}>
                   <select className={inputCls} value={calFloor} onChange={e => { setCalFloor(e.target.value); setCalRoomId('') }}>
                     <option value="">{T.statusAll}</option>
-                    {getFloorCodes(calBuilding).map(f => <option key={f.CODE} value={f.CODE}>{f.CODE_NAME}</option>)}
+                    {getFloorCodes(calBuilding).map(f => <option key={g(f,'code')} value={g(f,'code')}>{g(f,'code_name')}</option>)}
                   </select>
                 </FormGroup>
                 <FormGroup label={T.lblRoom}>
                   <select className={inputCls} style={{width:180}} value={calRoomId} onChange={e => setCalRoomId(e.target.value)}>
                     <option value="">{T.statusAll}</option>
-                    {filteredRooms(calBuilding, calFloor).map(r => <option key={r.ROOM_ID} value={r.ROOM_ID}>{r.ROOM_NAME}{r.APPROVAL_REQUIRED_YN==='Y'?' ⚠️':''}</option>)}
+                    {filteredRooms(calBuilding, calFloor).map(r => <option key={g(r,'room_id')} value={g(r,'room_id')}>{g(r,'room_name')}{g(r,'approval_required_yn')==='Y'?' ⚠️':''}</option>)}
                   </select>
                 </FormGroup>
-                <Btn onClick={loadCalendar} primary>{T.btnSearch}</Btn>
+                <Btn primary onClick={loadCalendar}>{T.btnSearch}</Btn>
               </div>
-              {/* Calendar */}
               <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
                 <div className="p-4 border-b border-gray-100 flex items-center justify-center gap-4">
                   <button onClick={() => { const d = new Date(calYear, calMonth-1); setCalYear(d.getFullYear()); setCalMonth(d.getMonth()) }}
-                    className="w-8 h-8 flex items-center justify-center rounded-full border border-gray-200 hover:bg-[#F5A623] hover:border-[#F5A623] hover:text-[#1A1A2E] text-lg transition">‹</button>
+                    className="w-8 h-8 flex items-center justify-center rounded-full border border-gray-200 hover:bg-[#F5A623] hover:border-[#F5A623] text-lg transition">‹</button>
                   <span className="text-lg font-bold min-w-40 text-center">{T.monthLabel(calYear, calMonth)}</span>
                   <button onClick={() => { const d = new Date(calYear, calMonth+1); setCalYear(d.getFullYear()); setCalMonth(d.getMonth()) }}
-                    className="w-8 h-8 flex items-center justify-center rounded-full border border-gray-200 hover:bg-[#F5A623] hover:border-[#F5A623] hover:text-[#1A1A2E] text-lg transition">›</button>
+                    className="w-8 h-8 flex items-center justify-center rounded-full border border-gray-200 hover:bg-[#F5A623] hover:border-[#F5A623] text-lg transition">›</button>
                 </div>
                 <div className="p-3">
                   <div className="grid grid-cols-7 gap-0.5 mb-1">
@@ -420,7 +365,6 @@ export default function App() {
                   <div className="grid grid-cols-7 gap-0.5">
                     {calendarDays().map(({ date, current }, idx) => {
                       const ds = fmtDate(date)
-                      const todayStr = today()
                       const res = resForDate(ds)
                       const dow = date.getDay()
                       return (
@@ -428,17 +372,17 @@ export default function App() {
                           onClick={() => { setModalData({ date: ds, reservations: res }); setModal('dayDetail') }}
                           className={`border rounded p-1.5 min-h-[88px] cursor-pointer transition-all hover:border-[#F5A623] hover:shadow-sm
                             ${!current ? 'bg-gray-50 opacity-40' : 'bg-white'}
-                            ${ds === todayStr ? 'border-[#F5A623]' : 'border-gray-200'}`}>
+                            ${ds === today() ? 'border-[#F5A623]' : 'border-gray-200'}`}>
                           <div className={`text-xs font-semibold w-6 h-6 flex items-center justify-center mb-1
-                            ${ds===todayStr ? 'bg-[#F5A623] text-[#1A1A2E] rounded-full' : dow===0?'text-red-500':dow===6?'text-blue-500':''}`}>
+                            ${ds===today() ? 'bg-[#F5A623] text-[#1A1A2E] rounded-full' : dow===0?'text-red-500':dow===6?'text-blue-500':''}`}>
                             {date.getDate()}
                           </div>
                           <div className="flex flex-col gap-0.5">
-                            {res.slice(0,2).map(r => (
-                              <div key={r.RESERVATION_ID}
+                            {res.slice(0,2).map((r:any) => (
+                              <div key={g(r,'reservation_id')}
                                 className={`text-[10px] px-1 py-0.5 rounded truncate
-                                  ${r.STATUS_CODE==='RESERVED'?'bg-green-100 text-green-800':r.STATUS_CODE==='REQUESTED'?'bg-yellow-100 text-yellow-800':'bg-red-100 text-red-800'}`}>
-                                {r.START_TIME} {r.TITLE}
+                                  ${g(r,'status_code')==='RESERVED'?'bg-green-100 text-green-800':g(r,'status_code')==='REQUESTED'?'bg-yellow-100 text-yellow-800':'bg-red-100 text-red-800'}`}>
+                                {g(r,'start_time')} {g(r,'title')}
                               </div>
                             ))}
                             {res.length > 2 && <div className="text-[10px] text-gray-400 px-1">+{res.length-2}</div>}
@@ -452,7 +396,7 @@ export default function App() {
             </div>
           )}
 
-          {/* ── My Reservations ── */}
+          {/* My Reservations */}
           {page === 'myreservations' && (
             <div>
               <PageHeader title={T.myResPageTitle} sub={T.myResPageSub} />
@@ -469,27 +413,25 @@ export default function App() {
                   </select>
                 </FormGroup>
                 <FormGroup label={T.lblTitleSearch}><input type="text" className={inputCls} value={myResTitle} onChange={e=>setMyResTitle(e.target.value)} style={{width:160}} /></FormGroup>
-                <Btn onClick={loadMyRes} primary>{T.btnSearch}</Btn>
+                <Btn primary onClick={loadMyRes}>{T.btnSearch}</Btn>
               </FilterBar>
               <TableCard>
                 <TableHead cols={T.myResThead} />
                 <tbody>{myResList.length===0
                   ? <tr><td colSpan={9} className="text-center py-8 text-gray-400">{T.tableNoData}</td></tr>
-                  : myResList.map(r => (
-                    <tr key={r.RESERVATION_ID} className="hover:bg-gray-50">
-                      <td>{r.RESERVATION_DATE}</td>
-                      <td className="whitespace-nowrap">{r.ALL_DAY_YN==='Y'?T.allDayLabel:`${r.START_TIME}~${r.END_TIME}`}</td>
-                      <td>{r.BUILDING_CODE} / {r.FLOOR_CODE}F</td>
-                      <td>{r.ROOM_NAME}</td>
-                      <td className="font-medium">{r.TITLE}</td>
-                      <td>{r.PARTICIPANT_COUNT}</td>
-                      <td>{badge(r.STATUS_CODE)}</td>
-                      <td className="text-xs text-gray-400">{r.CREATED_AT?.slice(0,16)}</td>
-                      <td>
-                        {r.STATUS_CODE !== 'CANCELED' && r.STATUS_CODE !== 'REJECTED' && (
-                          <Btn small onClick={() => cancelReservation(r.RESERVATION_ID)} danger>취소</Btn>
-                        )}
-                      </td>
+                  : myResList.map((r:any) => (
+                    <tr key={g(r,'reservation_id')} className="hover:bg-gray-50">
+                      <td>{g(r,'reservation_date')?.slice(0,10)}</td>
+                      <td className="whitespace-nowrap">{g(r,'all_day_yn')==='Y'?T.allDayLabel:`${g(r,'start_time')}~${g(r,'end_time')}`}</td>
+                      <td>{g(r,'building_code')} / {g(r,'floor_code')}F</td>
+                      <td>{g(r,'room_name')}</td>
+                      <td className="font-medium">{g(r,'title')}</td>
+                      <td>{g(r,'participant_count')}</td>
+                      <td>{badge(g(r,'status_code'))}</td>
+                      <td className="text-xs text-gray-400">{g(r,'created_at')?.slice(0,16)}</td>
+                      <td>{g(r,'status_code') !== 'CANCELED' && g(r,'status_code') !== 'REJECTED' && (
+                        <Btn small danger onClick={() => cancelReservation(g(r,'reservation_id'))}>취소</Btn>
+                      )}</td>
                     </tr>
                   ))
                 }</tbody>
@@ -497,33 +439,31 @@ export default function App() {
             </div>
           )}
 
-          {/* ── Approvals ── */}
+          {/* Approvals */}
           {page === 'approvals' && (
             <div>
               <PageHeader title={T.appPageTitle} sub={T.appPageSub} />
               <FilterBar>
                 <FormGroup label={T.lblDateFrom}><input type="date" className={inputCls} value={appFrom} onChange={e=>setAppFrom(e.target.value)} style={{width:140}} /></FormGroup>
                 <FormGroup label={T.lblDateTo}><input type="date" className={inputCls} value={appTo} onChange={e=>setAppTo(e.target.value)} style={{width:140}} /></FormGroup>
-                <Btn onClick={loadApprovals} primary>{T.btnSearch}</Btn>
+                <Btn primary onClick={loadApprovals}>{T.btnSearch}</Btn>
               </FilterBar>
               <TableCard>
                 <TableHead cols={T.appThead} />
                 <tbody>{appList.length===0
                   ? <tr><td colSpan={10} className="text-center py-8 text-gray-400">{T.tableNoData}</td></tr>
-                  : appList.map(r => (
-                    <tr key={r.RESERVATION_ID} className="hover:bg-gray-50">
-                      <td>{r.RESERVATION_DATE}</td>
-                      <td className="whitespace-nowrap">{r.ALL_DAY_YN==='Y'?T.allDayLabel:`${r.START_TIME}~${r.END_TIME}`}</td>
-                      <td>{r.BUILDING_CODE}/{r.FLOOR_CODE}F</td>
-                      <td>{r.ROOM_NAME}</td>
-                      <td className="font-medium">{r.TITLE}</td>
-                      <td>{r.PARTICIPANT_COUNT}</td>
-                      <td>{r.REQUEST_USER_NAME}</td>
-                      <td className="text-xs text-gray-400">{r.REQUEST_DATETIME?.slice(0,16)}</td>
-                      <td>{badge(r.STATUS_CODE)}</td>
-                      <td>
-                        <Btn small primary onClick={() => { setModalData({ res: r, ACTION_COMMENT:'', REJECT_REASON:'' }); setModal('approval') }}>처리</Btn>
-                      </td>
+                  : appList.map((r:any) => (
+                    <tr key={g(r,'reservation_id')} className="hover:bg-gray-50">
+                      <td>{g(r,'reservation_date')?.slice(0,10)}</td>
+                      <td className="whitespace-nowrap">{g(r,'all_day_yn')==='Y'?T.allDayLabel:`${g(r,'start_time')}~${g(r,'end_time')}`}</td>
+                      <td>{g(r,'building_code')}/{g(r,'floor_code')}F</td>
+                      <td>{g(r,'room_name')}</td>
+                      <td className="font-medium">{g(r,'title')}</td>
+                      <td>{g(r,'participant_count')}</td>
+                      <td>{g(r,'request_user_name')}</td>
+                      <td className="text-xs text-gray-400">{g(r,'request_datetime')?.slice(0,16)}</td>
+                      <td>{badge(g(r,'status_code'))}</td>
+                      <td><Btn small primary onClick={() => { setModalData({ res: r, ACTION_COMMENT:'', REJECT_REASON:'' }); setModal('approval') }}>처리</Btn></td>
                     </tr>
                   ))
                 }</tbody>
@@ -531,26 +471,26 @@ export default function App() {
             </div>
           )}
 
-          {/* ── Room Manage ── */}
+          {/* Room Manage */}
           {page === 'roommanage' && (
             <div>
               <PageHeader title={T.rmPageTitle} sub={T.rmPageSub}>
-                <Btn primary onClick={() => setModal('room')}>{T.newLabel}</Btn>
+                <Btn primary onClick={() => { setModalData({ APPROVAL_REQUIRED_YN:'N', USE_YN:'Y' }); setModal('room') }}>{T.newLabel}</Btn>
               </PageHeader>
               <TableCard>
                 <TableHead cols={T.rmThead} />
                 <tbody>{rooms.length===0
                   ? <tr><td colSpan={8} className="text-center py-8 text-gray-400">{T.tableNoData}</td></tr>
-                  : rooms.map(r => (
-                    <tr key={r.ROOM_ID} className="hover:bg-gray-50">
-                      <td>{r.BUILDING_CODE}</td>
-                      <td>{r.FLOOR_CODE}F</td>
-                      <td><code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">{r.ROOM_CODE}</code></td>
-                      <td className="font-medium">{r.ROOM_NAME}</td>
-                      <td>{r.CAPACITY}</td>
-                      <td>{r.APPROVAL_REQUIRED_YN==='Y'?<span className="badge bg-orange-100 text-orange-700 text-xs px-2 py-0.5 rounded-full">필요</span>:'—'}</td>
-                      <td>{r.USE_YN==='Y'?<span className="text-green-600 text-xs font-semibold">●</span>:<span className="text-gray-400 text-xs">○</span>}</td>
-                      <td><Btn small onClick={() => { setModalData({...r}); setModal('room') }}>{T.modifyLabel}</Btn></td>
+                  : rooms.map((r:any) => (
+                    <tr key={g(r,'room_id')} className="hover:bg-gray-50">
+                      <td>{g(r,'building_code')}</td>
+                      <td>{g(r,'floor_code')}F</td>
+                      <td><code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">{g(r,'room_code')}</code></td>
+                      <td className="font-medium">{g(r,'room_name')}</td>
+                      <td>{g(r,'capacity')}</td>
+                      <td>{g(r,'approval_required_yn')==='Y'?<span className="bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-0.5 rounded-full">필요</span>:'—'}</td>
+                      <td>{g(r,'use_yn')==='Y'?<span className="text-green-600 text-xs font-semibold">●</span>:<span className="text-gray-400 text-xs">○</span>}</td>
+                      <td><Btn small onClick={() => { setModalData({ ROOM_ID:g(r,'room_id'), BUILDING_CODE:g(r,'building_code'), FLOOR_CODE:g(r,'floor_code'), ROOM_CODE:g(r,'room_code'), ROOM_NAME:g(r,'room_name'), CAPACITY:g(r,'capacity'), APPROVAL_REQUIRED_YN:g(r,'approval_required_yn'), USE_YN:g(r,'use_yn'), REMARK:g(r,'remark') }); setModal('room') }}>{T.modifyLabel}</Btn></td>
                     </tr>
                   ))
                 }</tbody>
@@ -558,21 +498,21 @@ export default function App() {
             </div>
           )}
 
-          {/* ── Auth Manage ── */}
+          {/* Auth Manage — 미팅룸별 승인자 복수 지정 */}
           {page === 'authmanage' && (
             <div>
               <PageHeader title={T.authPageTitle} sub={T.authPageSub}>
-                <Btn primary onClick={() => { setModalData({}); setModal('auth') }}>{T.addLabel}</Btn>
+                <Btn primary onClick={() => { setModalData({ AUTH_TYPE:'APPROVER', USE_YN:'Y' }); setModal('auth') }}>{T.addLabel}</Btn>
               </PageHeader>
               <FilterBar>
                 <FormGroup label={T.lblAuthRoom}>
-                  <select className={inputCls} style={{width:180}} value={authFilterRoom} onChange={e=>setAuthFilterRoom(e.target.value)}>
+                  <select className={inputCls} style={{width:200}} value={authFilterRoom} onChange={e=>setAuthFilterRoom(e.target.value)}>
                     <option value="">{T.statusAll}</option>
-                    {rooms.filter(r=>r.USE_YN==='Y').map(r=><option key={r.ROOM_ID} value={r.ROOM_ID}>{r.ROOM_NAME}</option>)}
+                    {rooms.filter((r:any)=>g(r,'use_yn')==='Y').map((r:any)=><option key={g(r,'room_id')} value={g(r,'room_id')}>{g(r,'room_name')}</option>)}
                   </select>
                 </FormGroup>
                 <FormGroup label={T.lblAuthType}>
-                  <select className={inputCls} style={{width:120}} value={authFilterType} onChange={e=>setAuthFilterType(e.target.value)}>
+                  <select className={inputCls} style={{width:130}} value={authFilterType} onChange={e=>setAuthFilterType(e.target.value)}>
                     <option value="">{T.authAll}</option>
                     <option value="ADMIN">{T.authAdmin}</option>
                     <option value="APPROVER">{T.authApprover}</option>
@@ -580,22 +520,28 @@ export default function App() {
                 </FormGroup>
                 <Btn primary onClick={loadAuthList}>{T.btnSearch}</Btn>
               </FilterBar>
+              {/* 미팅룸별 승인자 그룹 표시 */}
+              {authList.length > 0 && (
+                <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-xs text-blue-700">
+                  💡 승인이 필요한 미팅룸에 승인자를 복수로 지정할 수 있습니다. 모든 승인자가 승인 권한을 가집니다.
+                </div>
+              )}
               <TableCard>
                 <TableHead cols={T.authThead} />
                 <tbody>{authList.length===0
                   ? <tr><td colSpan={7} className="text-center py-8 text-gray-400">{T.tableNoData}</td></tr>
                   : authList.map((a:any) => (
-                    <tr key={a.room_auth_id} className="hover:bg-gray-50">
-                      <td>{a.room_name}</td>
-                      <td><code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{a.user_id}</code></td>
-                      <td>{a.user_name}</td>
-                      <td>{a.dept_name}</td>
-                      <td>{a.auth_type==='ADMIN'
+                    <tr key={g(a,'room_auth_id')} className="hover:bg-gray-50">
+                      <td className="font-medium">{g(a,'room_name')}</td>
+                      <td><code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{g(a,'user_id')}</code></td>
+                      <td>{g(a,'user_name')}</td>
+                      <td className="text-gray-500">{g(a,'dept_name')}</td>
+                      <td>{g(a,'auth_type')==='ADMIN'
                         ? <span className="bg-purple-100 text-purple-700 text-xs font-semibold px-2 py-0.5 rounded-full">{T.authAdmin}</span>
                         : <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">{T.authApprover}</span>}
                       </td>
-                      <td>{a.use_yn==='Y'?<span className="text-green-600 text-xs font-semibold">●</span>:<span className="text-gray-400 text-xs">○</span>}</td>
-                      <td><Btn small onClick={() => { setModalData({...a, ROOM_AUTH_ID:a.room_auth_id, ROOM_ID:a.room_id, USER_ID:a.user_id, AUTH_TYPE:a.auth_type, USE_YN:a.use_yn}); setModal('auth') }}>{T.modifyLabel}</Btn></td>
+                      <td>{g(a,'use_yn')==='Y'?<span className="text-green-600 text-xs font-semibold">●</span>:<span className="text-gray-400 text-xs">○</span>}</td>
+                      <td><Btn small onClick={() => { setModalData({ ROOM_AUTH_ID:g(a,'room_auth_id'), ROOM_ID:g(a,'room_id'), USER_ID:g(a,'user_id'), AUTH_TYPE:g(a,'auth_type'), USE_YN:g(a,'use_yn') }); setModal('auth') }}>{T.modifyLabel}</Btn></td>
                     </tr>
                   ))
                 }</tbody>
@@ -603,7 +549,7 @@ export default function App() {
             </div>
           )}
 
-          {/* ── User Manage ── */}
+          {/* User Manage */}
           {page === 'usermanage' && (
             <div>
               <PageHeader title={T.userPageTitle} sub={T.userPageSub}>
@@ -613,15 +559,15 @@ export default function App() {
                 <TableHead cols={T.userThead} />
                 <tbody>{users.length===0
                   ? <tr><td colSpan={7} className="text-center py-8 text-gray-400">{T.tableNoData}</td></tr>
-                  : users.map(u => (
-                    <tr key={u.USER_ID} className="hover:bg-gray-50">
-                      <td><code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{u.USER_ID}</code></td>
-                      <td className="font-medium">{u.USER_NAME}</td>
-                      <td className="text-xs text-gray-500">{u.EMAIL}</td>
-                      <td>{u.DEPT_NAME}</td>
-                      <td>{u.IS_SYS_ADMIN==='Y'?<span className="bg-purple-100 text-purple-700 text-xs font-semibold px-2 py-0.5 rounded-full">Y</span>:'—'}</td>
-                      <td>{u.USE_YN==='Y'?<span className="text-green-600 text-xs font-semibold">●</span>:<span className="text-gray-400 text-xs">○</span>}</td>
-                      <td><Btn small onClick={() => { setModalData({...u, _isEdit:true}); setModal('user') }}>{T.modifyLabel}</Btn></td>
+                  : users.map((u:any) => (
+                    <tr key={g(u,'user_id')} className="hover:bg-gray-50">
+                      <td><code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{g(u,'user_id')}</code></td>
+                      <td className="font-medium">{g(u,'user_name')}</td>
+                      <td className="text-xs text-gray-500">{g(u,'email')}</td>
+                      <td>{g(u,'dept_name')}</td>
+                      <td>{g(u,'is_sys_admin')==='Y'?<span className="bg-purple-100 text-purple-700 text-xs font-semibold px-2 py-0.5 rounded-full">Y</span>:'—'}</td>
+                      <td>{g(u,'use_yn')==='Y'?<span className="text-green-600 text-xs font-semibold">●</span>:<span className="text-gray-400 text-xs">○</span>}</td>
+                      <td><Btn small onClick={() => { setModalData({ USER_ID:g(u,'user_id'), USER_NAME:g(u,'user_name'), EMAIL:g(u,'email'), DEPT_NAME:g(u,'dept_name'), IS_SYS_ADMIN:g(u,'is_sys_admin'), USE_YN:g(u,'use_yn'), _isEdit:true }); setModal('user') }}>{T.modifyLabel}</Btn></td>
                     </tr>
                   ))
                 }</tbody>
@@ -629,12 +575,12 @@ export default function App() {
             </div>
           )}
 
-          {/* ── Code Manage ── */}
+          {/* Code Manage */}
           {page === 'codemanage' && (
             <CodeManagePage codes={codes} codeDtls={codeDtls} setCodes={setCodes} setCodeDtls={setCodeDtls} currentUser={currentUser} T={T} />
           )}
 
-          {/* ── History ── */}
+          {/* History */}
           {page === 'history' && (
             <div>
               <PageHeader title={T.hisPageTitle} sub={T.hisPageSub} />
@@ -657,13 +603,13 @@ export default function App() {
                 <tbody>{hisList.length===0
                   ? <tr><td colSpan={7} className="text-center py-8 text-gray-400">{T.tableNoData}</td></tr>
                   : hisList.map((h:any) => (
-                    <tr key={h.his_id} className="hover:bg-gray-50 text-sm">
-                      <td className="text-xs text-gray-400">#{h.his_id}</td>
-                      <td className="text-xs text-gray-400">#{h.reservation_id}</td>
-                      <td><span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${h.action_type==='CREATE'?'bg-green-100 text-green-700':h.action_type==='UPDATE'?'bg-yellow-100 text-yellow-700':'bg-red-100 text-red-700'}`}>{T.histActionMap[h.action_type]||h.action_type}</span></td>
-                      <td>{h.action_user_name||h.action_user_id}</td>
-                      <td className="text-xs text-gray-500">{h.action_datetime?.slice(0,16)}</td>
-                      <td className="text-xs text-gray-400">{h.remark||'—'}</td>
+                    <tr key={g(h,'his_id')} className="hover:bg-gray-50 text-sm">
+                      <td className="text-xs text-gray-400">#{g(h,'his_id')}</td>
+                      <td className="text-xs text-gray-400">#{g(h,'reservation_id')}</td>
+                      <td><span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${g(h,'action_type')==='CREATE'?'bg-green-100 text-green-700':g(h,'action_type')==='UPDATE'?'bg-yellow-100 text-yellow-700':'bg-red-100 text-red-700'}`}>{T.histActionMap[g(h,'action_type')]||g(h,'action_type')}</span></td>
+                      <td>{g(h,'action_user_name')||g(h,'action_user_id')}</td>
+                      <td className="text-xs text-gray-500">{g(h,'action_datetime')?.slice(0,16)}</td>
+                      <td className="text-xs text-gray-400">{g(h,'remark')||'—'}</td>
                       <td><Btn small onClick={() => { setModalData(h); setModal('hisDetail') }}>▸</Btn></td>
                     </tr>
                   ))
@@ -675,36 +621,34 @@ export default function App() {
         </main>
       </div>
 
-      {/* ══════════════ MODALS ══════════════ */}
+      {/* ══ MODALS ══ */}
 
-      {/* User Switch */}
       {modal === 'userSwitch' && (
-        <Modal title={T.userChange} onClose={() => setModal(null)} size="sm">
+        <DraggableModal title={T.userChange} onClose={() => setModal(null)} size="sm">
           <div className="mb-4 bg-blue-50 border border-blue-200 text-blue-800 text-xs p-3 rounded">Windows AD 연동 전 시뮬레이션 모드입니다.</div>
           <FormGroup label={T.userChange}>
-            <select className={inputCls} value={currentUser?.USER_ID||''}
-              onChange={e => { const u = users.find(x=>x.USER_ID===e.target.value); if(u) setCurrentUser(u) }}>
-              {users.filter(u=>u.USE_YN==='Y').map(u=><option key={u.USER_ID} value={u.USER_ID}>{u.USER_NAME} ({u.DEPT_NAME}) {u.IS_SYS_ADMIN==='Y'?'★':''}</option>)}
+            <select className={inputCls} value={g(currentUser,'user_id')||''}
+              onChange={e => { const u = users.find((x:any)=>g(x,'user_id')===e.target.value); if(u) setCurrentUser(u) }}>
+              {users.filter((u:any)=>g(u,'use_yn')==='Y').map((u:any)=><option key={g(u,'user_id')} value={g(u,'user_id')}>{g(u,'user_name')} ({g(u,'dept_name')}) {g(u,'is_sys_admin')==='Y'?'★':''}</option>)}
             </select>
           </FormGroup>
           <ModalFooter><Btn onClick={() => setModal(null)}>{T.closeLabel}</Btn></ModalFooter>
-        </Modal>
+        </DraggableModal>
       )}
 
-      {/* Day Detail */}
       {modal === 'dayDetail' && (
-        <Modal title={`📅 ${modalData.date}`} onClose={() => setModal(null)}>
+        <DraggableModal title={`📅 ${modalData.date}`} onClose={() => setModal(null)}>
           <div className="mb-4 space-y-2">
             {modalData.reservations?.length === 0
               ? <p className="text-sm text-gray-400 text-center py-4">예약 없음</p>
-              : modalData.reservations?.map((r:Reservation) => (
-                <div key={r.RESERVATION_ID} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border">
-                  <div className="text-xs text-gray-500 whitespace-nowrap">{r.START_TIME}~{r.END_TIME}</div>
+              : modalData.reservations?.map((r:any) => (
+                <div key={g(r,'reservation_id')} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border">
+                  <div className="text-xs text-gray-500 whitespace-nowrap">{g(r,'start_time')}~{g(r,'end_time')}</div>
                   <div className="flex-1">
-                    <div className="font-medium text-sm">{r.TITLE}</div>
-                    <div className="text-xs text-gray-400">{r.ROOM_NAME} · {r.PARTICIPANT_COUNT}명</div>
+                    <div className="font-medium text-sm">{g(r,'title')}</div>
+                    <div className="text-xs text-gray-400">{g(r,'room_name')} · {g(r,'participant_count')}명</div>
                   </div>
-                  {badge(r.STATUS_CODE)}
+                  {badge(g(r,'status_code'))}
                 </div>
               ))}
           </div>
@@ -712,13 +656,12 @@ export default function App() {
             <Btn primary onClick={() => { setModalData({ RESERVATION_DATE: modalData.date }); setModal('reservation') }}>＋ 예약</Btn>
             <Btn onClick={() => setModal(null)}>{T.closeLabel}</Btn>
           </ModalFooter>
-        </Modal>
+        </DraggableModal>
       )}
 
-      {/* Reservation Modal */}
       {modal === 'reservation' && (
-        <Modal title={modalData.RESERVATION_ID ? T.resModalTitleEdit : T.resModalTitleNew} onClose={() => setModal(null)}>
-          {modalData.ROOM_ID && rooms.find(r=>r.ROOM_ID===modalData.ROOM_ID)?.APPROVAL_REQUIRED_YN==='Y' && (
+        <DraggableModal title={modalData.RESERVATION_ID ? T.resModalTitleEdit : T.resModalTitleNew} onClose={() => setModal(null)}>
+          {modalData.ROOM_ID && rooms.find((r:any)=>g(r,'room_id')==modalData.ROOM_ID && g(r,'approval_required_yn')==='Y') && (
             <div className="mb-3 bg-yellow-50 border border-yellow-200 text-yellow-800 text-xs p-3 rounded">{T.approvalNoteMsg}</div>
           )}
           <div className="space-y-3">
@@ -726,20 +669,20 @@ export default function App() {
               <FormGroup label={T.lblBuilding} required>
                 <select className={inputCls} value={modalData.BUILDING_CODE||''} onChange={e=>setModalData({...modalData,BUILDING_CODE:e.target.value,FLOOR_CODE:'',ROOM_ID:''})}>
                   <option value="">—</option>
-                  {getBuildingCodes().map(b=><option key={b.CODE} value={b.CODE}>{b.CODE_NAME}</option>)}
+                  {getBuildingCodes().map(b=><option key={g(b,'code')} value={g(b,'code')}>{g(b,'code_name')}</option>)}
                 </select>
               </FormGroup>
               <FormGroup label={T.lblFloor} required>
                 <select className={inputCls} value={modalData.FLOOR_CODE||''} onChange={e=>setModalData({...modalData,FLOOR_CODE:e.target.value,ROOM_ID:''})}>
                   <option value="">—</option>
-                  {getFloorCodes(modalData.BUILDING_CODE||'').map(f=><option key={f.CODE} value={f.CODE}>{f.CODE_NAME}</option>)}
+                  {getFloorCodes(modalData.BUILDING_CODE||'').map(f=><option key={g(f,'code')} value={g(f,'code')}>{g(f,'code_name')}</option>)}
                 </select>
               </FormGroup>
             </div>
             <FormGroup label={T.lblRoom} required>
               <select className={inputCls} value={modalData.ROOM_ID||''} onChange={e=>setModalData({...modalData,ROOM_ID:parseInt(e.target.value)})}>
                 <option value="">—</option>
-                {filteredRooms(modalData.BUILDING_CODE, modalData.FLOOR_CODE).map(r=><option key={r.ROOM_ID} value={r.ROOM_ID}>{r.ROOM_NAME}{r.APPROVAL_REQUIRED_YN==='Y'?' ⚠️':''}</option>)}
+                {filteredRooms(modalData.BUILDING_CODE, modalData.FLOOR_CODE).map((r:any)=><option key={g(r,'room_id')} value={g(r,'room_id')}>{g(r,'room_name')}{g(r,'approval_required_yn')==='Y'?' ⚠️':''}</option>)}
               </select>
             </FormGroup>
             <div className="grid grid-cols-2 gap-3">
@@ -773,7 +716,7 @@ export default function App() {
               <input type="text" className={inputCls} value={modalData.TITLE||''} onChange={e=>setModalData({...modalData,TITLE:e.target.value})} />
             </FormGroup>
             <FormGroup label={T.lblResParticipants}>
-              <select className={inputCls} value={modalData.PARTICIPANT_COUNT||''} onChange={e=>setModalData({...modalData,PARTICIPANT_COUNT:parseInt(e.target.value)})}>
+              <select className={inputCls} value={modalData.PARTICIPANT_COUNT||1} onChange={e=>setModalData({...modalData,PARTICIPANT_COUNT:parseInt(e.target.value)})}>
                 {Array.from({length:50},(_,i)=>i+1).map(n=><option key={n} value={n}>{n}명</option>)}
               </select>
             </FormGroup>
@@ -782,17 +725,16 @@ export default function App() {
             <Btn onClick={() => setModal(null)}>{T.closeLabel}</Btn>
             <Btn primary onClick={saveReservation}>{T.saveLabel}</Btn>
           </ModalFooter>
-        </Modal>
+        </DraggableModal>
       )}
 
-      {/* Approval Modal */}
       {modal === 'approval' && modalData.res && (
-        <Modal title="✅ 승인/거절 처리" onClose={() => setModal(null)}>
+        <DraggableModal title="✅ 승인/거절 처리" onClose={() => setModal(null)}>
           <div className="bg-gray-50 rounded-lg p-3 mb-4 text-sm space-y-1">
-            <div><span className="text-gray-500">미팅룸:</span> <strong>{modalData.res.ROOM_NAME}</strong></div>
-            <div><span className="text-gray-500">일시:</span> {modalData.res.RESERVATION_DATE} {modalData.res.START_TIME}~{modalData.res.END_TIME}</div>
-            <div><span className="text-gray-500">제목:</span> {modalData.res.TITLE}</div>
-            <div><span className="text-gray-500">신청자:</span> {modalData.res.REQUEST_USER_NAME}</div>
+            <div><span className="text-gray-500">미팅룸:</span> <strong>{g(modalData.res,'room_name')}</strong></div>
+            <div><span className="text-gray-500">일시:</span> {g(modalData.res,'reservation_date')?.slice(0,10)} {g(modalData.res,'start_time')}~{g(modalData.res,'end_time')}</div>
+            <div><span className="text-gray-500">제목:</span> {g(modalData.res,'title')}</div>
+            <div><span className="text-gray-500">신청자:</span> {g(modalData.res,'request_user_name')}</div>
           </div>
           <FormGroup label={T.lblAppComment}>
             <textarea className={inputCls} rows={2} value={modalData.ACTION_COMMENT||''} onChange={e=>setModalData({...modalData,ACTION_COMMENT:e.target.value})} />
@@ -802,27 +744,26 @@ export default function App() {
           </FormGroup>
           <ModalFooter>
             <Btn onClick={() => setModal(null)}>{T.closeLabel}</Btn>
-            <Btn danger onClick={() => processApproval(modalData.res.RESERVATION_ID,'REJECTED')}>{T.btnReject}</Btn>
-            <Btn primary onClick={() => processApproval(modalData.res.RESERVATION_ID,'APPROVED')}>{T.btnApprove}</Btn>
+            <Btn danger onClick={() => processApproval(g(modalData.res,'reservation_id'),'REJECTED')}>{T.btnReject}</Btn>
+            <Btn primary onClick={() => processApproval(g(modalData.res,'reservation_id'),'APPROVED')}>{T.btnApprove}</Btn>
           </ModalFooter>
-        </Modal>
+        </DraggableModal>
       )}
 
-      {/* Room Modal */}
       {modal === 'room' && (
-        <Modal title={modalData.ROOM_ID ? T.modifyLabel : T.newLabel} onClose={() => setModal(null)}>
+        <DraggableModal title={modalData.ROOM_ID ? T.modifyLabel : T.newLabel} onClose={() => setModal(null)}>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <FormGroup label={T.lblBuilding} required>
                 <select className={inputCls} value={modalData.BUILDING_CODE||''} onChange={e=>setModalData({...modalData,BUILDING_CODE:e.target.value,FLOOR_CODE:''})}>
                   <option value="">—</option>
-                  {getBuildingCodes().map(b=><option key={b.CODE} value={b.CODE}>{b.CODE_NAME}</option>)}
+                  {getBuildingCodes().map(b=><option key={g(b,'code')} value={g(b,'code')}>{g(b,'code_name')}</option>)}
                 </select>
               </FormGroup>
               <FormGroup label={T.lblFloor} required>
                 <select className={inputCls} value={modalData.FLOOR_CODE||''} onChange={e=>setModalData({...modalData,FLOOR_CODE:e.target.value})}>
                   <option value="">—</option>
-                  {getFloorCodes(modalData.BUILDING_CODE||'').map(f=><option key={f.CODE} value={f.CODE}>{f.CODE_NAME}</option>)}
+                  {getFloorCodes(modalData.BUILDING_CODE||'').map(f=><option key={g(f,'code')} value={g(f,'code')}>{g(f,'code_name')}</option>)}
                 </select>
               </FormGroup>
             </div>
@@ -857,23 +798,27 @@ export default function App() {
             <Btn onClick={() => setModal(null)}>{T.closeLabel}</Btn>
             <Btn primary onClick={saveRoom}>{T.saveLabel}</Btn>
           </ModalFooter>
-        </Modal>
+        </DraggableModal>
       )}
 
-      {/* Auth Modal */}
       {modal === 'auth' && (
-        <Modal title={modalData.ROOM_AUTH_ID ? T.modifyLabel + ' 권한' : '＋ 권한 추가'} onClose={() => setModal(null)} size="sm">
+        <DraggableModal title={modalData.ROOM_AUTH_ID ? '권한 수정' : '＋ 권한 추가'} onClose={() => setModal(null)} size="sm">
+          {!modalData.ROOM_AUTH_ID && (
+            <div className="mb-3 bg-blue-50 border border-blue-200 text-blue-700 text-xs p-3 rounded">
+              💡 같은 미팅룸에 승인자를 여러 명 추가할 수 있습니다.
+            </div>
+          )}
           <div className="space-y-3">
             <FormGroup label={T.lblAuthRoom} required>
               <select className={inputCls} value={modalData.ROOM_ID||''} onChange={e=>setModalData({...modalData,ROOM_ID:parseInt(e.target.value)})}>
                 <option value="">—</option>
-                {rooms.filter(r=>r.USE_YN==='Y').map(r=><option key={r.ROOM_ID} value={r.ROOM_ID}>{r.ROOM_NAME}</option>)}
+                {rooms.filter((r:any)=>g(r,'use_yn')==='Y').map((r:any)=><option key={g(r,'room_id')} value={g(r,'room_id')}>{g(r,'room_name')}{g(r,'approval_required_yn')==='Y'?' ⚠️':''}</option>)}
               </select>
             </FormGroup>
             <FormGroup label={T.lblAuthUser} required>
               <select className={inputCls} value={modalData.USER_ID||''} onChange={e=>setModalData({...modalData,USER_ID:e.target.value})}>
                 <option value="">—</option>
-                {users.filter(u=>u.USE_YN==='Y').map(u=><option key={u.USER_ID} value={u.USER_ID}>{u.USER_NAME} ({u.DEPT_NAME})</option>)}
+                {users.filter((u:any)=>g(u,'use_yn')==='Y').map((u:any)=><option key={g(u,'user_id')} value={g(u,'user_id')}>{g(u,'user_name')} ({g(u,'dept_name')})</option>)}
               </select>
             </FormGroup>
             <FormGroup label={T.lblAuthType} required>
@@ -900,12 +845,11 @@ export default function App() {
             <Btn onClick={() => setModal(null)}>{T.closeLabel}</Btn>
             <Btn primary onClick={saveAuth}>{T.saveLabel}</Btn>
           </ModalFooter>
-        </Modal>
+        </DraggableModal>
       )}
 
-      {/* User Modal */}
       {modal === 'user' && (
-        <Modal title={modalData._isEdit ? T.modifyLabel + ' 사용자' : T.newLabel} onClose={() => setModal(null)} size="sm">
+        <DraggableModal title={modalData._isEdit ? '사용자 수정' : T.newLabel} onClose={() => setModal(null)} size="sm">
           <div className="space-y-3">
             <FormGroup label={T.lblUserId} required>
               <input type="text" className={inputCls} value={modalData.USER_ID||''} disabled={!!modalData._isEdit}
@@ -939,31 +883,34 @@ export default function App() {
             <Btn onClick={() => setModal(null)}>{T.closeLabel}</Btn>
             <Btn primary onClick={saveUser}>{T.saveLabel}</Btn>
           </ModalFooter>
-        </Modal>
+        </DraggableModal>
       )}
 
-      {/* History Detail */}
       {modal === 'hisDetail' && (
-        <Modal title="이력 상세" onClose={() => setModal(null)}>
+        <DraggableModal title="이력 상세" onClose={() => setModal(null)}>
           <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-            <div><span className="text-gray-400 text-xs">HIS ID</span><div>#{modalData.his_id}</div></div>
-            <div><span className="text-gray-400 text-xs">Reservation ID</span><div>#{modalData.reservation_id}</div></div>
-            <div><span className="text-gray-400 text-xs">Action</span><div>{modalData.action_type}</div></div>
-            <div><span className="text-gray-400 text-xs">User</span><div>{modalData.action_user_name||modalData.action_user_id}</div></div>
-            <div className="col-span-2"><span className="text-gray-400 text-xs">Timestamp</span><div>{modalData.action_datetime}</div></div>
+            <div><span className="text-gray-400 text-xs">HIS ID</span><div>#{g(modalData,'his_id')}</div></div>
+            <div><span className="text-gray-400 text-xs">Reservation ID</span><div>#{g(modalData,'reservation_id')}</div></div>
+            <div><span className="text-gray-400 text-xs">Action</span><div>{g(modalData,'action_type')}</div></div>
+            <div><span className="text-gray-400 text-xs">User</span><div>{g(modalData,'action_user_name')||g(modalData,'action_user_id')}</div></div>
+            <div className="col-span-2"><span className="text-gray-400 text-xs">Timestamp</span><div>{g(modalData,'action_datetime')}</div></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <div className="text-xs font-semibold text-gray-400 mb-2">{T.hisBeforeLabel}</div>
-              <pre className="bg-red-50 rounded p-3 text-xs overflow-auto max-h-48 whitespace-pre-wrap">{modalData.before_value ? JSON.stringify(JSON.parse(modalData.before_value),null,2) : '—'}</pre>
+              <pre className="bg-red-50 rounded p-3 text-xs overflow-auto max-h-48 whitespace-pre-wrap">
+                {g(modalData,'before_value') ? JSON.stringify(JSON.parse(g(modalData,'before_value')),null,2) : '—'}
+              </pre>
             </div>
             <div>
               <div className="text-xs font-semibold text-gray-400 mb-2">{T.hisAfterLabel}</div>
-              <pre className="bg-green-50 rounded p-3 text-xs overflow-auto max-h-48 whitespace-pre-wrap">{modalData.after_value ? JSON.stringify(JSON.parse(modalData.after_value),null,2) : '—'}</pre>
+              <pre className="bg-green-50 rounded p-3 text-xs overflow-auto max-h-48 whitespace-pre-wrap">
+                {g(modalData,'after_value') ? JSON.stringify(JSON.parse(g(modalData,'after_value')),null,2) : '—'}
+              </pre>
             </div>
           </div>
           <ModalFooter><Btn onClick={() => setModal(null)}>{T.closeLabel}</Btn></ModalFooter>
-        </Modal>
+        </DraggableModal>
       )}
 
     </div>
@@ -976,81 +923,134 @@ function CodeManagePage({ codes, codeDtls, setCodes, setCodeDtls, currentUser, T
   const [modal, setModal] = useState<string|null>(null)
   const [modalData, setModalData] = useState<any>({})
 
-  const selGroup = codes.find((c:any) => c.CODE_GROUP_ID === selGroupId || c.code_group_id === selGroupId)
-  const details  = codeDtls.filter((d:any) => (d.CODE_GROUP_ID||d.code_group_id) === selGroupId)
-    .sort((a:any,b:any) => (a.SORT_ORDER||a.sort_order||0)-(b.SORT_ORDER||b.sort_order||0))
+  const selGroup = codes.find((c:any) => (g(c,'code_group_id')) == selGroupId)
+  const details  = codeDtls
+    .filter((d:any) => g(d,'code_group_id') == selGroupId)
+    .sort((a:any,b:any) => (g(a,'sort_order')||0)-(g(b,'sort_order')||0))
+
+  // BUILDING 코드에서 실제 등록된 건물 목록 추출
+  const buildingGroup = codes.find((c:any) => g(c,'code_group') === 'BUILDING')
+  const buildingCodes = buildingGroup
+    ? codeDtls.filter((d:any) => g(d,'code_group_id') == g(buildingGroup,'code_group_id') && g(d,'use_yn') === 'Y')
+    : []
+
+  // Floor 그룹인지 확인
+  const isFloorGroup = selGroup && g(selGroup,'code_group')?.startsWith('FLOOR_')
+  // Floor 그룹의 건물명 추출
+  const floorBuildingCode = isFloorGroup ? g(selGroup,'code_group')?.replace('FLOOR_','') : null
+  const floorBuildingName = floorBuildingCode
+    ? buildingCodes.find((b:any) => g(b,'code') === floorBuildingCode)
+    : null
 
   async function saveGroup() {
     const method = modalData.CODE_GROUP_ID ? 'PUT' : 'POST'
     const url    = modalData.CODE_GROUP_ID ? `/api/codes/${modalData.CODE_GROUP_ID}` : '/api/codes'
-    const payload = { CODE_GROUP: modalData.CODE_GROUP, CODE_GROUP_NAME: modalData.CODE_GROUP_NAME, USE_YN: modalData.USE_YN||'Y', CREATED_BY: currentUser?.USER_ID||'system', UPDATED_BY: currentUser?.USER_ID||'system' }
+    const payload = { CODE_GROUP: modalData.CODE_GROUP, CODE_GROUP_NAME: modalData.CODE_GROUP_NAME, USE_YN: modalData.USE_YN||'Y', CREATED_BY: g(currentUser,'user_id')||'system', UPDATED_BY: g(currentUser,'user_id')||'system' }
     const res = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
     if (!res.ok) { alert('Error'); return }
-    const updated = await fetch('/api/codes').then(r=>r.json())
-    setCodes(updated); setModal(null)
+    setCodes(await fetch('/api/codes').then(r=>r.json())); setModal(null)
+  }
+
+  async function addFloorGroup(buildingCode: string, buildingName: string) {
+    const grpCode = `FLOOR_${buildingCode}`
+    const exists = codes.find((c:any) => g(c,'code_group') === grpCode)
+    if (exists) { alert(`${buildingName} 층 그룹이 이미 존재합니다.`); return }
+    const res = await fetch('/api/codes', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ CODE_GROUP: grpCode, CODE_GROUP_NAME: `${buildingName} Floors`, USE_YN:'Y', CREATED_BY: g(currentUser,'user_id')||'system' }) })
+    if (!res.ok) { alert('Error'); return }
+    setCodes(await fetch('/api/codes').then(r=>r.json()))
   }
 
   async function saveDetail() {
     const method = modalData.CODE_ID ? 'PUT' : 'POST'
     const url    = modalData.CODE_ID ? `/api/codes/details/${modalData.CODE_ID}` : '/api/codes/details'
-    const payload = { ...modalData, CODE_GROUP_ID: selGroupId, CREATED_BY: currentUser?.USER_ID||'system', UPDATED_BY: currentUser?.USER_ID||'system' }
+    const payload = { ...modalData, CODE_GROUP_ID: selGroupId, CREATED_BY: g(currentUser,'user_id')||'system', UPDATED_BY: g(currentUser,'user_id')||'system' }
     const res = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
     if (!res.ok) { alert('Error'); return }
-    const updated = await fetch('/api/codes/details').then(r=>r.json())
-    setCodeDtls(updated); setModal(null)
+    setCodeDtls(await fetch('/api/codes/details').then(r=>r.json())); setModal(null)
   }
 
   async function deleteDetail(id: number) {
-    if (!confirm(T.alertDeleted)) return
+    if (!confirm('삭제하시겠습니까?')) return
     await fetch(`/api/codes/details/${id}`, { method: 'DELETE' })
-    const updated = await fetch('/api/codes/details').then(r=>r.json())
-    setCodeDtls(updated)
+    setCodeDtls(await fetch('/api/codes/details').then(r=>r.json()))
   }
 
   return (
     <div>
       <PageHeader title={T.codePageTitle} sub={T.codePageSub} />
-      <div className="grid grid-cols-[280px_1fr] gap-4">
+      <div className="grid grid-cols-[300px_1fr] gap-4">
         {/* Code Groups */}
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
           <div className="p-3 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-lg">
             <span className="text-sm font-semibold">{T.codeGrpTitle}</span>
             <Btn small primary onClick={() => { setModalData({USE_YN:'Y'}); setModal('group') }}>＋</Btn>
           </div>
+          {/* BUILDING 기반 Floor 그룹 빠른 추가 */}
+          {buildingCodes.length > 0 && (
+            <div className="p-3 border-b border-gray-100 bg-yellow-50">
+              <div className="text-xs font-semibold text-gray-500 mb-2">🏢 층 그룹 빠른 추가</div>
+              <div className="flex flex-wrap gap-1">
+                {buildingCodes.map((b:any) => {
+                  const exists = codes.find((c:any) => g(c,'code_group') === `FLOOR_${g(b,'code')}`)
+                  return (
+                    <button key={g(b,'code')}
+                      onClick={() => !exists && addFloorGroup(g(b,'code'), g(b,'code_name'))}
+                      className={`text-xs px-2 py-0.5 rounded border transition
+                        ${exists ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-default' : 'bg-white text-blue-600 border-blue-300 hover:bg-blue-50 cursor-pointer'}`}>
+                      {exists ? '✓' : '＋'} {g(b,'code_name')}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
           <div className="max-h-[500px] overflow-y-auto">
-            {codes.map((g:any) => (
-              <div key={g.CODE_GROUP_ID||g.code_group_id}
-                onClick={() => setSelGroupId(g.CODE_GROUP_ID||g.code_group_id)}
-                className={`flex items-center px-4 py-3 cursor-pointer border-b border-gray-50 transition-all
-                  ${selGroupId===(g.CODE_GROUP_ID||g.code_group_id)?'bg-yellow-50 border-l-2 border-l-[#F5A623]':'hover:bg-gray-50'}`}>
-                <div className="flex-1">
-                  <div className="text-sm font-medium">{g.CODE_GROUP||g.code_group}</div>
-                  <div className="text-xs text-gray-400">{g.CODE_GROUP_NAME||g.code_group_name}</div>
+            {codes.map((grp:any) => (
+              <div key={g(grp,'code_group_id')}
+                onClick={() => setSelGroupId(g(grp,'code_group_id'))}
+                className={`flex items-center px-4 py-2.5 cursor-pointer border-b border-gray-50 transition-all
+                  ${selGroupId==g(grp,'code_group_id') ? 'bg-yellow-50 border-l-2 border-l-[#F5A623]' : 'hover:bg-gray-50'}`}>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">{g(grp,'code_group')}</div>
+                  <div className="text-xs text-gray-400">{g(grp,'code_group_name')}</div>
                 </div>
-                <button onClick={e=>{e.stopPropagation();setModalData({CODE_GROUP_ID:g.CODE_GROUP_ID||g.code_group_id,CODE_GROUP:g.CODE_GROUP||g.code_group,CODE_GROUP_NAME:g.CODE_GROUP_NAME||g.code_group_name,USE_YN:g.USE_YN||g.use_yn});setModal('group')}}
-                  className="text-xs px-2 py-0.5 bg-gray-100 rounded hover:bg-gray-200">✎</button>
+                {g(grp,'code_group')?.startsWith('FLOOR_') && (
+                  <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded mr-1">층</span>
+                )}
+                <button onClick={e=>{e.stopPropagation();setModalData({CODE_GROUP_ID:g(grp,'code_group_id'),CODE_GROUP:g(grp,'code_group'),CODE_GROUP_NAME:g(grp,'code_group_name'),USE_YN:g(grp,'use_yn')});setModal('group')}}
+                  className="text-xs px-1.5 py-0.5 bg-gray-100 rounded hover:bg-gray-200 shrink-0">✎</button>
               </div>
             ))}
           </div>
         </div>
+
         {/* Code Details */}
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
           <div className="p-3 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-lg">
-            <span className="text-sm font-semibold">{selGroup ? `${T.codeGrpTitle} — ${selGroup.CODE_GROUP||selGroup.code_group}` : T.codeGrpTitle}</span>
+            <div>
+              <span className="text-sm font-semibold">
+                {selGroup ? g(selGroup,'code_group') : T.codeGrpTitle}
+              </span>
+              {isFloorGroup && floorBuildingName && (
+                <span className="ml-2 text-xs text-blue-600">({g(floorBuildingName,'code_name')} 건물 층 코드)</span>
+              )}
+            </div>
             <Btn small primary disabled={!selGroupId} onClick={() => { setModalData({USE_YN:'Y'}); setModal('detail') }}>＋ 코드 추가</Btn>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full"><thead><tr>{T.codeDtlThead.map((h:string)=><th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-gray-400 uppercase bg-gray-50 border-b">{h}</th>)}</tr></thead>
+            <table className="w-full">
+              <thead><tr>{T.codeDtlThead.map((h:string)=><th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-gray-400 uppercase bg-gray-50 border-b">{h}</th>)}</tr></thead>
               <tbody>{details.length===0
                 ? <tr><td colSpan={5} className="text-center py-8 text-gray-300 text-sm">{selGroupId ? T.tableNoData : '← 코드 그룹을 선택하세요'}</td></tr>
                 : details.map((d:any) => (
-                  <tr key={d.CODE_ID||d.code_id} className="hover:bg-gray-50 border-b border-gray-50">
-                    <td className="px-3 py-2"><code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">{d.CODE||d.code}</code></td>
-                    <td className="px-3 py-2 font-medium text-sm">{d.CODE_NAME||d.code_name}</td>
-                    <td className="px-3 py-2 text-sm">{d.SORT_ORDER||d.sort_order||'—'}</td>
-                    <td className="px-3 py-2">{(d.USE_YN||d.use_yn)==='Y'?<span className="text-green-600 text-xs font-semibold">●</span>:<span className="text-gray-300 text-xs">○</span>}</td>
+                  <tr key={g(d,'code_id')} className="hover:bg-gray-50 border-b border-gray-50">
+                    <td className="px-3 py-2"><code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">{g(d,'code')}</code></td>
+                    <td className="px-3 py-2 font-medium text-sm">{g(d,'code_name')}</td>
+                    <td className="px-3 py-2 text-sm">{g(d,'sort_order')||'—'}</td>
+                    <td className="px-3 py-2">{g(d,'use_yn')==='Y'?<span className="text-green-600 text-xs font-semibold">●</span>:<span className="text-gray-300 text-xs">○</span>}</td>
                     <td className="px-3 py-2">
-                      <Btn small onClick={()=>{setModalData({CODE_ID:d.CODE_ID||d.code_id,CODE:d.CODE||d.code,CODE_NAME:d.CODE_NAME||d.code_name,SORT_ORDER:d.SORT_ORDER||d.sort_order,USE_YN:d.USE_YN||d.use_yn});setModal('detail')}}>수정</Btn>
+                      <Btn small onClick={()=>{setModalData({CODE_ID:g(d,'code_id'),CODE:g(d,'code'),CODE_NAME:g(d,'code_name'),SORT_ORDER:g(d,'sort_order'),USE_YN:g(d,'use_yn')});setModal('detail')}}>수정</Btn>
                     </td>
                   </tr>
                 ))
@@ -1061,17 +1061,17 @@ function CodeManagePage({ codes, codeDtls, setCodes, setCodeDtls, currentUser, T
       </div>
 
       {modal === 'group' && (
-        <Modal title="코드 그룹" onClose={() => setModal(null)} size="sm">
+        <DraggableModal title="코드 그룹" onClose={() => setModal(null)} size="sm">
           <div className="space-y-3">
             <FormGroup label={T.lblCgCode} required><input className={inputCls} value={modalData.CODE_GROUP||''} onChange={e=>setModalData({...modalData,CODE_GROUP:e.target.value})} /></FormGroup>
             <FormGroup label={T.lblCgName} required><input className={inputCls} value={modalData.CODE_GROUP_NAME||''} onChange={e=>setModalData({...modalData,CODE_GROUP_NAME:e.target.value})} /></FormGroup>
             <FormGroup label="사용여부"><select className={inputCls} value={modalData.USE_YN||'Y'} onChange={e=>setModalData({...modalData,USE_YN:e.target.value})}><option value="Y">Y</option><option value="N">N</option></select></FormGroup>
           </div>
           <ModalFooter><Btn onClick={()=>setModal(null)}>닫기</Btn><Btn primary onClick={saveGroup}>저장</Btn></ModalFooter>
-        </Modal>
+        </DraggableModal>
       )}
       {modal === 'detail' && (
-        <Modal title="코드 상세" onClose={() => setModal(null)} size="sm">
+        <DraggableModal title="코드 상세" onClose={() => setModal(null)} size="sm">
           <div className="space-y-3">
             <FormGroup label={T.lblCdCode} required><input className={inputCls} value={modalData.CODE||''} onChange={e=>setModalData({...modalData,CODE:e.target.value})} /></FormGroup>
             <FormGroup label={T.lblCdName} required><input className={inputCls} value={modalData.CODE_NAME||''} onChange={e=>setModalData({...modalData,CODE_NAME:e.target.value})} /></FormGroup>
@@ -1083,7 +1083,7 @@ function CodeManagePage({ codes, codeDtls, setCodes, setCodeDtls, currentUser, T
             <Btn onClick={()=>setModal(null)}>닫기</Btn>
             <Btn primary onClick={saveDetail}>저장</Btn>
           </ModalFooter>
-        </Modal>
+        </DraggableModal>
       )}
     </div>
   )
@@ -1130,19 +1130,46 @@ function TableCard({ children }: { children: React.ReactNode }) {
 function TableHead({ cols }: { cols: string[] }) {
   return <thead><tr>{cols.map(c => <th key={c} className="text-left px-3 py-2.5 text-[11px] font-semibold text-gray-400 uppercase tracking-wide bg-gray-50 border-b border-gray-200 whitespace-nowrap">{c}</th>)}</tr></thead>
 }
-function Modal({ title, onClose, children, size='md' }: { title: string; onClose: () => void; children: React.ReactNode; size?: 'sm'|'md' }) {
+
+// ── Draggable Modal ────────────────────────────────────────────
+function DraggableModal({ title, onClose, children, size='md' }: { title: string; onClose: () => void; children: React.ReactNode; size?: 'sm'|'md' }) {
+  const [pos, setPos] = useState({ x: 0, y: 0 })
+  const dragging = useRef(false)
+  const startPos = useRef({ mx: 0, my: 0, px: 0, py: 0 })
+
+  function onMouseDown(e: React.MouseEvent) {
+    dragging.current = true
+    startPos.current = { mx: e.clientX, my: e.clientY, px: pos.x, py: pos.y }
+    e.preventDefault()
+  }
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!dragging.current) return
+      setPos({ x: startPos.current.px + e.clientX - startPos.current.mx, y: startPos.current.py + e.clientY - startPos.current.my })
+    }
+    function onUp() { dragging.current = false }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+  }, [])
+
   return (
-    <div className="fixed inset-0 bg-black/50 z-[1000] flex items-center justify-center p-5 animate-[fadeIn_0.15s_ease]">
-      <div className={`bg-white rounded-xl shadow-2xl w-full max-h-[90vh] overflow-y-auto ${size==='sm'?'max-w-md':'max-w-lg'}`}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gray-50 rounded-t-xl">
+    <div className="fixed inset-0 bg-black/50 z-[1000] flex items-center justify-center p-5">
+      <div
+        className={`bg-white rounded-xl shadow-2xl w-full max-h-[90vh] overflow-y-auto select-none ${size==='sm'?'max-w-md':'max-w-lg'}`}
+        style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, position: 'relative' }}>
+        <div
+          onMouseDown={onMouseDown}
+          className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gray-50 rounded-t-xl cursor-grab active:cursor-grabbing">
           <span className="text-base font-bold">{title}</span>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl leading-none">×</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl leading-none ml-4">×</button>
         </div>
         <div className="p-5">{children}</div>
       </div>
     </div>
   )
 }
+
 function ModalFooter({ children }: { children: React.ReactNode }) {
   return <div className="flex justify-end gap-2 pt-4 mt-4 border-t border-gray-100">{children}</div>
 }

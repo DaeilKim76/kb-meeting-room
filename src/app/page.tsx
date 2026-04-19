@@ -187,7 +187,7 @@ export default function App() {
   }
 
   async function cancelReservation(id: number) {
-    if (!confirm('예약을 취소하시겠습니까?')) return
+    if (!confirm(T.confirmCancelRes)) return
     await fetch(`/api/reservations/${id}`, { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ userId: g(currentUser,'user_id') }) })
     loadMyRes(); loadCalendar()
   }
@@ -430,7 +430,7 @@ export default function App() {
                       <td>{badge(g(r,'status_code'))}</td>
                       <td className="text-xs text-gray-400">{g(r,'created_at')?.slice(0,16)}</td>
                       <td>{g(r,'status_code') !== 'CANCELED' && g(r,'status_code') !== 'REJECTED' && (
-                        <Btn small danger onClick={() => cancelReservation(g(r,'reservation_id'))}>취소</Btn>
+                        <Btn small danger onClick={() => cancelReservation(g(r,'reservation_id'))}>{T.cancelResLabel}</Btn>
                       )}</td>
                     </tr>
                   ))
@@ -488,7 +488,7 @@ export default function App() {
                       <td><code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">{g(r,'room_code')}</code></td>
                       <td className="font-medium">{g(r,'room_name')}</td>
                       <td>{g(r,'capacity')}</td>
-                      <td>{g(r,'approval_required_yn')==='Y'?<span className="bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-0.5 rounded-full">필요</span>:'—'}</td>
+                      <td>{g(r,'approval_required_yn')==='Y'?<span className="bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-0.5 rounded-full">{T.approvalRequired}</span>:'—'}</td>
                       <td>{g(r,'use_yn')==='Y'?<span className="text-green-600 text-xs font-semibold">●</span>:<span className="text-gray-400 text-xs">○</span>}</td>
                       <td><Btn small onClick={() => { setModalData({ ROOM_ID:g(r,'room_id'), BUILDING_CODE:g(r,'building_code'), FLOOR_CODE:g(r,'floor_code'), ROOM_CODE:g(r,'room_code'), ROOM_NAME:g(r,'room_name'), CAPACITY:g(r,'capacity'), APPROVAL_REQUIRED_YN:g(r,'approval_required_yn'), USE_YN:g(r,'use_yn'), REMARK:g(r,'remark') }); setModal('room') }}>{T.modifyLabel}</Btn></td>
                     </tr>
@@ -523,7 +523,7 @@ export default function App() {
               {/* 미팅룸별 승인자 그룹 표시 */}
               {authList.length > 0 && (
                 <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-xs text-blue-700">
-                  💡 승인이 필요한 미팅룸에 승인자를 복수로 지정할 수 있습니다. 모든 승인자가 승인 권한을 가집니다.
+                  {T.authMultiNote}
                 </div>
               )}
               <TableCard>
@@ -805,7 +805,7 @@ export default function App() {
         <DraggableModal title={modalData.ROOM_AUTH_ID ? '권한 수정' : '＋ 권한 추가'} onClose={() => setModal(null)} size="sm">
           {!modalData.ROOM_AUTH_ID && (
             <div className="mb-3 bg-blue-50 border border-blue-200 text-blue-700 text-xs p-3 rounded">
-              💡 같은 미팅룸에 승인자를 여러 명 추가할 수 있습니다.
+              {T.authAddNote}
             </div>
           )}
           <div className="space-y-3">
@@ -1036,11 +1036,11 @@ function CodeManagePage({ codes, codeDtls, setCodes, setCodeDtls, currentUser, T
       <div className="flex gap-1 mb-4 bg-white border border-gray-200 rounded-lg p-1 w-fit shadow-sm">
         <button onClick={() => setTab('floor')}
           className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${tab==='floor' ? 'bg-[#F5A623] text-[#1A1A2E]' : 'text-gray-500 hover:text-gray-700'}`}>
-          🏢 건물 / 층 관리
+          {T.codeTabFloor}
         </button>
         <button onClick={() => setTab('code')}
           className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${tab==='code' ? 'bg-[#F5A623] text-[#1A1A2E]' : 'text-gray-500 hover:text-gray-700'}`}>
-          ⚙️ 기타 공통코드
+          {T.codeTabOther}
         </button>
       </div>
 
@@ -1050,8 +1050,8 @@ function CodeManagePage({ codes, codeDtls, setCodes, setCodeDtls, currentUser, T
           {/* 건물 목록 */}
           <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
             <div className="p-3 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-lg">
-              <span className="text-sm font-semibold">🏢 건물 목록</span>
-              <Btn small primary onClick={() => { setModalData({ USE_YN:'Y', SORT_ORDER: buildingCodes.length + 1 }); setModal('building') }}>＋ 건물</Btn>
+              <span className="text-sm font-semibold">{T.codeBuildingList}</span>
+              <Btn small primary onClick={() => { setModalData({ USE_YN:'Y', SORT_ORDER: buildingCodes.length + 1 }); setModal('building') }}>{T.codeBuildingAdd}</Btn>
             </div>
             <div className="divide-y divide-gray-50">
               {buildingCodes.length === 0
@@ -1083,20 +1083,20 @@ function CodeManagePage({ codes, codeDtls, setCodes, setCodeDtls, currentUser, T
                     : '층 목록'}
                 </span>
                 {selBuilding && !floorGroup && (
-                  <span className="ml-2 text-xs text-orange-500">층 그룹 없음 — 저장 시 자동 생성</span>
+                  <span className="ml-2 text-xs text-orange-500">{T.codeFloorNoGroup}</span>
                 )}
               </div>
-              <Btn small primary disabled={!selBuilding} onClick={() => { setModalData({ USE_YN:'Y', SORT_ORDER: floorDetails.length + 1 }); setModal('floor') }}>＋ 층</Btn>
+              <Btn small primary disabled={!selBuilding} onClick={() => { setModalData({ USE_YN:'Y', SORT_ORDER: floorDetails.length + 1 }); setModal('floor') }}>{T.codeFloorAdd}</Btn>
             </div>
             {!selBuilding
-              ? <div className="text-center py-12 text-gray-300 text-sm">← 건물을 선택하세요</div>
+              ? <div className="text-center py-12 text-gray-300 text-sm">{T.codeSelectBuilding}</div>
               : (
                 <table className="w-full">
                   <thead><tr>
-                    {['층 코드','층명','정렬순서','사용여부','관리'].map(h=><th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-gray-400 uppercase bg-gray-50 border-b">{h}</th>)}
+                    {['층 코드',T.codeFloorName,T.codeSortOrder,'사용여부','관리'].map(h=><th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-gray-400 uppercase bg-gray-50 border-b">{h}</th>)}
                   </tr></thead>
                   <tbody>{floorDetails.length===0
-                    ? <tr><td colSpan={5} className="text-center py-8 text-gray-300 text-sm">층 정보가 없습니다. ＋ 층 버튼으로 추가하세요.</td></tr>
+                    ? <tr><td colSpan={5} className="text-center py-8 text-gray-300 text-sm">{T.codeNoFloor}</td></tr>
                     : floorDetails.map((d:any) => (
                       <tr key={g(d,'code_id')} className="hover:bg-gray-50 border-b border-gray-50">
                         <td className="px-3 py-2"><code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">{g(d,'code')}</code></td>
@@ -1143,12 +1143,12 @@ function CodeManagePage({ codes, codeDtls, setCodes, setCodeDtls, currentUser, T
           <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
             <div className="p-3 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-lg">
               <span className="text-sm font-semibold">{selGroup ? g(selGroup,'code_group') : '코드 상세'}</span>
-              <Btn small primary disabled={!selGroupId} onClick={() => { setModalData({USE_YN:'Y'}); setModal('detail') }}>＋ 코드 추가</Btn>
+              <Btn small primary disabled={!selGroupId} onClick={() => { setModalData({USE_YN:'Y'}); setModal('detail') }}>{T.addLabel} 코드</Btn>
             </div>
             <table className="w-full">
               <thead><tr>{T.codeDtlThead.map((h:string)=><th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-gray-400 uppercase bg-gray-50 border-b">{h}</th>)}</tr></thead>
               <tbody>{otherDetails.length===0
-                ? <tr><td colSpan={5} className="text-center py-8 text-gray-300 text-sm">{selGroupId ? T.tableNoData : '← 코드 그룹을 선택하세요'}</td></tr>
+                ? <tr><td colSpan={5} className="text-center py-8 text-gray-300 text-sm">{selGroupId ? T.tableNoData : T.codeSelectGroup}</td></tr>
                 : otherDetails.map((d:any) => (
                   <tr key={g(d,'code_id')} className="hover:bg-gray-50 border-b border-gray-50">
                     <td className="px-3 py-2"><code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">{g(d,'code')}</code></td>
@@ -1166,7 +1166,7 @@ function CodeManagePage({ codes, codeDtls, setCodes, setCodeDtls, currentUser, T
 
       {/* 건물 모달 */}
       {modal === 'building' && (
-        <DraggableModal title={modalData.CODE_ID ? '건물 수정' : '＋ 건물 추가'} onClose={() => setModal(null)} size="sm">
+        <DraggableModal title={modalData.CODE_ID ? `${T.modifyLabel} ${T.codeBuildingModal}` : `＋ ${T.codeBuildingModal}`} onClose={() => setModal(null)} size="sm">
           <div className="space-y-3">
             <FormGroup label="건물 코드 (영문대문자)" required><input className={inputCls} value={modalData.CODE||''} disabled={!!modalData.CODE_ID} placeholder="HEAD_QUARTER" onChange={e=>setModalData({...modalData,CODE:e.target.value.toUpperCase()})} /></FormGroup>
             <FormGroup label="건물명" required><input className={inputCls} value={modalData.CODE_NAME||''} placeholder="Head Quarter" onChange={e=>setModalData({...modalData,CODE_NAME:e.target.value})} /></FormGroup>
@@ -1184,7 +1184,7 @@ function CodeManagePage({ codes, codeDtls, setCodes, setCodeDtls, currentUser, T
 
       {/* 층 모달 */}
       {modal === 'floor' && (
-        <DraggableModal title={modalData.CODE_ID ? '층 수정' : '＋ 층 추가'} onClose={() => setModal(null)} size="sm">
+        <DraggableModal title={modalData.CODE_ID ? `${T.modifyLabel} ${T.codeFloorModal}` : `＋ ${T.codeFloorModal}`} onClose={() => setModal(null)} size="sm">
           <div className="space-y-3">
             <FormGroup label="층 코드 (숫자)" required><input className={inputCls} value={modalData.CODE||''} placeholder="3" onChange={e=>setModalData({...modalData,CODE:e.target.value})} /></FormGroup>
             <FormGroup label="층명" required><input className={inputCls} value={modalData.CODE_NAME||''} placeholder="Floor 3" onChange={e=>setModalData({...modalData,CODE_NAME:e.target.value})} /></FormGroup>
@@ -1201,7 +1201,7 @@ function CodeManagePage({ codes, codeDtls, setCodes, setCodeDtls, currentUser, T
 
       {/* 기타 코드 그룹 모달 */}
       {modal === 'group' && (
-        <DraggableModal title="코드 그룹" onClose={() => setModal(null)} size="sm">
+        <DraggableModal title={T.codeGroupModal} onClose={() => setModal(null)} size="sm">
           <div className="space-y-3">
             <FormGroup label={T.lblCgCode} required><input className={inputCls} value={modalData.CODE_GROUP||''} onChange={e=>setModalData({...modalData,CODE_GROUP:e.target.value})} /></FormGroup>
             <FormGroup label={T.lblCgName} required><input className={inputCls} value={modalData.CODE_GROUP_NAME||''} onChange={e=>setModalData({...modalData,CODE_GROUP_NAME:e.target.value})} /></FormGroup>
@@ -1213,7 +1213,7 @@ function CodeManagePage({ codes, codeDtls, setCodes, setCodeDtls, currentUser, T
 
       {/* 기타 코드 상세 모달 */}
       {modal === 'detail' && (
-        <DraggableModal title="코드 상세" onClose={() => setModal(null)} size="sm">
+        <DraggableModal title={T.codeDetailModal} onClose={() => setModal(null)} size="sm">
           <div className="space-y-3">
             <FormGroup label={T.lblCdCode} required><input className={inputCls} value={modalData.CODE||''} onChange={e=>setModalData({...modalData,CODE:e.target.value})} /></FormGroup>
             <FormGroup label={T.lblCdName} required><input className={inputCls} value={modalData.CODE_NAME||''} onChange={e=>setModalData({...modalData,CODE_NAME:e.target.value})} /></FormGroup>

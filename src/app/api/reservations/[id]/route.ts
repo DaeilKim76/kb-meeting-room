@@ -4,6 +4,23 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 import { apiError } from '../../../../lib/api-error'
 
+async function saveHistory(sql: any, reservationId: string|number, actionType: string, userId: string, before: any, after: any, remark?: string) {
+  try {
+    await sql`
+      INSERT INTO tb_meeting_reservation_his
+        (reservation_id, action_type, action_user_id, action_datetime, before_value, after_value, remark)
+      VALUES (
+        ${reservationId}, ${actionType}, ${userId||'system'}, NOW(),
+        ${before ? JSON.stringify(before) : null},
+        ${after  ? JSON.stringify(after)  : null},
+        ${remark||null}
+      )`
+  } catch (e) {
+    // 이력 저장 실패는 무시 (메인 트랜잭션에 영향 없게)
+    console.error('History save failed:', e)
+  }
+}
+
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const sql = getDb()
@@ -26,11 +43,9 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const b = await req.json()
     const sql = getDb()
 
-    // 기존 값 백업 (이력용)
     const before = await sql`SELECT * FROM tb_meeting_reservation WHERE reservation_id=${params.id}`
     if (!before.length) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-    // 시간 충돌 체크 (자기 자신 제외)
     if (b.START_TIME && b.END_TIME) {
       const conflicts = await sql`
         SELECT reservation_id FROM tb_meeting_reservation
@@ -56,12 +71,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
         updated_by=${b.UPDATED_BY||'system'}, updated_at=NOW()
       WHERE reservation_id=${params.id} RETURNING *`
 
-    await sql`
-      INSERT INTO tb_meeting_reservation_his
-        (reservation_id, action_type, action_user_id, action_datetime, before_value, after_value)
-      VALUES (${params.id}, 'UPDATE', ${b.UPDATED_BY||'system'}, NOW(),
-              ${JSON.stringify(before[0])}, ${JSON.stringify(rows[0])})`
-
+    await saveHistory(sql, params.id, 'UPDATE', b.UPDATED_BY||'system', before[0], rows[0])
     return NextResponse.json(rows[0])
   } catch (e) {
     return apiError(e)
@@ -70,23 +80,20 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { userId } = await req.json().catch(() => ({ userId: 'system' }))
+    const body = await req.json().catch(() => ({}))
+    const userId = body.userId || 'system'
     const sql = getDb()
 
     const before = await sql`SELECT * FROM tb_meeting_reservation WHERE reservation_id=${params.id}`
     if (!before.length) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-    await sql`
+    const rows = await sql`
       UPDATE tb_meeting_reservation SET
-        cancel_yn='Y', status_code='CANCELED', updated_by=${userId||'system'}, updated_at=NOW()
-      WHERE reservation_id=${params.id}`
+        cancel_yn='Y', status_code='CANCELED',
+        updated_by=${userId}, updated_at=NOW()
+      WHERE reservation_id=${params.id} RETURNING *`
 
-    await sql`
-      INSERT INTO tb_meeting_reservation_his
-        (reservation_id, action_type, action_user_id, action_datetime, before_value, after_value, remark)
-      VALUES (${params.id}, 'DELETE', ${userId||'system'}, NOW(),
-              ${JSON.stringify(before[0])}, null, 'Canceled')`
-
+    await saveHistory(sql, params.id, 'DELETE', userId, before[0], rows[0], 'Canceled by user')
     return NextResponse.json({ success: true })
   } catch (e) {
     return apiError(e)

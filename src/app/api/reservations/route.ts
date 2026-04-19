@@ -80,11 +80,14 @@ export async function POST(req: NextRequest) {
          ${b.REQUEST_USER_ID}, NOW())
       RETURNING *`
 
-    // 이력 저장
-    await sql`
-      INSERT INTO tb_meeting_reservation_his
-        (reservation_id, action_type, action_user_id, action_datetime, after_value)
-      VALUES (${rows[0].reservation_id}, 'CREATE', ${b.REQUEST_USER_ID}, NOW(), ${JSON.stringify(rows[0])})`
+    // 이력 저장 (실패해도 예약은 완료)
+    try {
+      await sql`
+        INSERT INTO tb_meeting_reservation_his
+          (reservation_id, action_type, action_user_id, action_datetime, before_value, after_value)
+        VALUES (${rows[0].reservation_id}, 'CREATE', ${b.REQUEST_USER_ID}, NOW(),
+                ${null}, ${JSON.stringify(rows[0])})`
+    } catch (he) { console.error('History save failed:', he) }
 
     return NextResponse.json(rows[0], { status: 201 })
   } catch (e) {

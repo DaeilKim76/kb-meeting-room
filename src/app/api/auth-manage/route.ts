@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
-import { apiError } from '../../../lib/api-error'
+import { apiError, toUpperAll } from '../../../lib/api-error'
 
 export async function GET(req: NextRequest) {
   try {
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     query += ' ORDER BY r.room_name, a.auth_type, u.user_name'
 
     const rows = await sql(query, params)
-    return NextResponse.json(rows)
+    return NextResponse.json(toUpperAll(rows as any))
   } catch (e) {
     return apiError(e)
   }

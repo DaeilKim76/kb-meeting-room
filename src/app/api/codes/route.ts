@@ -2,13 +2,13 @@ export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
-import { apiError } from '../../../lib/api-error'
+import { apiError, toUpperAll } from '../../../lib/api-error'
 
 export async function GET() {
   try {
     const sql = getDb()
     const rows = await sql`SELECT * FROM tb_common_code ORDER BY code_group_id`
-    return NextResponse.json(rows)
+    return NextResponse.json(toUpperAll(rows as any))
   } catch (e) {
     return apiError(e)
   }

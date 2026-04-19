@@ -10,7 +10,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const sql = getDb()
     const rows = await sql`
       UPDATE tb_common_code_dtl SET
-        code=${b.CODE}, code_name=${b.CODE_NAME}, ref_value1=${b.REF_VALUE1||null},
+        code=${b.CODE}, code_name=${b.CODE_NAME},
         sort_order=${b.SORT_ORDER||null}, use_yn=${b.USE_YN},
         updated_by=${b.UPDATED_BY||'system'}, updated_at=NOW()
       WHERE code_id=${params.id} RETURNING *`

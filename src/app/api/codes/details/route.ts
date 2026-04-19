@@ -31,8 +31,8 @@ export async function POST(req: NextRequest) {
     const sql = getDb()
     const rows = await sql`
       INSERT INTO tb_common_code_dtl
-        (code_group_id, code, code_name, ref_value1, sort_order, use_yn, created_by, created_at)
-      VALUES (${b.CODE_GROUP_ID}, ${b.CODE}, ${b.CODE_NAME}, ${b.REF_VALUE1||null},
+        (code_group_id, code, code_name, sort_order, use_yn, created_by, created_at)
+      VALUES (${b.CODE_GROUP_ID}, ${b.CODE}, ${b.CODE_NAME},
               ${b.SORT_ORDER||null}, ${b.USE_YN||'Y'}, ${b.CREATED_BY||'system'}, NOW())
       RETURNING *`
     return NextResponse.json(toUpperAll([rows[0] as any])[0], { status: 201 })

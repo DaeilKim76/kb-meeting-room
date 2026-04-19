@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=Noto+Sans+Khmer:wght@400;500;600&display=swap');
+
+:root {
+  --kb-yellow: #F5A623;
+  --kb-gold:   #C8930A;
+  --kb-dark:   #1A1A2E;
+  --kb-navy:   #16213E;
+  --kb-accent: #E94560;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: 'Noto Sans KR', 'Noto Sans', 'Noto Sans Khmer', sans-serif;
+  background: #F8F9FC;
+  color: #1A1A2E;
+  font-size: 14px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: #f1f1f1; }
+::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
